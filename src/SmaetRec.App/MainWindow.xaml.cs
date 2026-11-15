@@ -453,9 +453,9 @@ public partial class MainWindow : Window
             Scene.Annotations.Add(_drawing);
             _drawing = null;
         }
-        else if (!_moved && Scene.Effects.ClickRipples && (_mode != Mode.Draw || _tool == Tool.None))
+        else if (!_moved && Scene.Effects.ClickRipples && (_mode == Mode.Effects || (_mode == Mode.Draw && _tool == Tool.None)))
         {
-            // A plain click on the picture shows a touch ripple there (useful for pointing at the iPhone).
+            // Outside arranging, a plain click on the picture shows a touch ripple there (useful for pointing at the iPhone).
             Engine.AddRipple(_downCanvas);
         }
         _dragLayer = null;
