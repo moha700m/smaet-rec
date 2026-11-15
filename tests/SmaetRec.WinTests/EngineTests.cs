@@ -133,7 +133,7 @@ public class EngineTests(ITestOutputHelper output)
     [Theory]
     [InlineData(VideoQuality.Hd720, 30)]
     [InlineData(VideoQuality.FullHd1080, 60)]
-    public void Recording_produces_a_correct_mp4(VideoQuality quality, int fps)
+    public async Task Recording_produces_a_correct_mp4(VideoQuality quality, int fps)
     {
         var folder = Path.Combine(Artifacts, "recordings");
         var scene = new Scene();
@@ -152,7 +152,7 @@ public class EngineTests(ITestOutputHelper output)
         Assert.True(engine.IsRecording);
         Thread.Sleep(3000);
         Assert.InRange(engine.RecordingElapsed.TotalSeconds, 2.9, 6);
-        var result = engine.StopRecordingAsync().GetAwaiter().GetResult();
+        var result = await engine.StopRecordingAsync();
         Assert.NotNull(result);
         Assert.False(engine.IsRecording);
         Assert.True(result!.Error == null, "recording failed: " + result.Error);
@@ -266,13 +266,10 @@ public class EngineTests(ITestOutputHelper output)
         Assert.Equal((320, 240), size);
         Assert.True(arrived >= 20);
 
-        // Upload the last picture the way the engine does and check the colour (source was B=192 G=64 R=32).
-        var device = new GraphicsDevice();
-        frames.Update(device);
-        Assert.NotNull(frames.Bitmap);
-        var pixels = new byte[320 * 240 * 4];
-        using (var map = new MappedBitmap(frames.Bitmap!)) map.CopyTo(pixels);
-        frames.Dispose(); device.Dispose();
+        // The last decoded picture should be the solid colour of the source (B=192 G=64 R=32).
+        Assert.True(frames.TryCopyLatest(out var pixels, out int fw, out int fh));
+        Assert.Equal((320, 240), (fw, fh));
+        frames.Dispose();
         var c = Pixel(pixels, 320, 160, 120);
         output.WriteLine($"decoded colour b={c.b} g={c.g} r={c.r}");
         Assert.InRange(c.b, 192 - 14, 192 + 14);
@@ -285,24 +282,6 @@ public class EngineTests(ITestOutputHelper output)
         for (int i = 0; i + 4 < data.Length; i++)
             if (data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 1 && (data[i + 3] & 0x1F) == type) return true;
         return false;
-    }
-
-    /// <summary>Reads a Direct2D bitmap back to memory.</summary>
-    private sealed class MappedBitmap(Vortice.Direct2D1.ID2D1Bitmap bitmap) : IDisposable
-    {
-        public void CopyTo(byte[] destination)
-        {
-            var b1 = bitmap.QueryInterface<Vortice.Direct2D1.ID2D1Bitmap1>();
-            var size = b1.PixelSize;
-            var map = b1.Map(Vortice.Direct2D1.MapOptions.Read);
-            try
-            {
-                for (int y = 0; y < size.Height; y++)
-                    System.Runtime.InteropServices.Marshal.Copy(map.Bits + (nint)(y * map.Pitch), destination, y * size.Width * 4, size.Width * 4);
-            }
-            finally { b1.Unmap(); b1.Dispose(); }
-        }
-        public void Dispose() { }
     }
 
     [Fact]

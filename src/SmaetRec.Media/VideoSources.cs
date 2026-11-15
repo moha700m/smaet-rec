@@ -249,6 +249,18 @@ public sealed class MemoryFrameSource : IVideoSource
         FrameArrived?.Invoke();
     }
 
+    /// <summary>Copies the newest picture (BGRA). Returns false when there is none.</summary>
+    public bool TryCopyLatest(out byte[] pixels, out int width, out int height)
+    {
+        lock (_lock)
+        {
+            width = _pendingWidth; height = _pendingHeight;
+            if (_pending == null) { pixels = Array.Empty<byte>(); return false; }
+            pixels = _pending.AsSpan(0, width * height * 4).ToArray();
+            return true;
+        }
+    }
+
     public void Clear()
     {
         lock (_lock) { _pending = null; _hasNew = true; }

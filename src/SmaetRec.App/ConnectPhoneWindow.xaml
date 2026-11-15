@@ -1,0 +1,107 @@
+<Window x:Class="SmaetRec.App.ConnectPhoneWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:core="clr-namespace:SmaetRec.Core;assembly=SmaetRec.Core"
+        xmlns:local="clr-namespace:SmaetRec.App"
+        Title="{Binding [ConnectTitle], Source={x:Static core:Loc.Instance}}" Width="860" SizeToContent="Height">
+    <StackPanel Margin="24">
+        <TextBlock Text="{Binding [ConnectTitle], Source={x:Static core:Loc.Instance}}" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,16"/>
+        <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Border Grid.Column="0" Background="{StaticResource SurfaceBrush}" CornerRadius="16" Padding="20">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                        <TextBlock Text="&#xE701;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="22" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding [WifiTab], Source={x:Static core:Loc.Instance}}" FontSize="17" FontWeight="SemiBold" Margin="10,0,0,0"/>
+                    </StackPanel>
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="34"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <Border Width="26" Height="26" CornerRadius="13" Background="{StaticResource AccentBrush}" VerticalAlignment="Top">
+                            <TextBlock Text="1" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <TextBlock Grid.Column="1" Text="{Binding [WifiStep1], Source={x:Static core:Loc.Instance}}" TextWrapping="Wrap" VerticalAlignment="Center" LineHeight="21"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="34"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <Border Width="26" Height="26" CornerRadius="13" Background="{StaticResource AccentBrush}" VerticalAlignment="Top">
+                            <TextBlock Text="2" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <TextBlock Grid.Column="1" Text="{Binding [WifiStep2], Source={x:Static core:Loc.Instance}}" TextWrapping="Wrap" VerticalAlignment="Center" LineHeight="21"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="34"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <Border Width="26" Height="26" CornerRadius="13" Background="{StaticResource AccentBrush}" VerticalAlignment="Top">
+                            <TextBlock Text="3" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <TextBlock Grid.Column="1" Text="{Binding [WifiStep3], Source={x:Static core:Loc.Instance}}" TextWrapping="Wrap" VerticalAlignment="Center" LineHeight="21"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="34"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <Border Width="26" Height="26" CornerRadius="13" Background="{StaticResource AccentBrush}" VerticalAlignment="Top">
+                            <TextBlock Text="4" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <TextBlock Grid.Column="1" x:Name="WifiStep4" TextWrapping="Wrap" VerticalAlignment="Center" LineHeight="21"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+            <Border Grid.Column="2" Background="{StaticResource SurfaceBrush}" CornerRadius="16" Padding="20">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                        <TextBlock Text="&#xE88E;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="22" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding [UsbTab], Source={x:Static core:Loc.Instance}}" FontSize="17" FontWeight="SemiBold" Margin="10,0,0,0"/>
+                    </StackPanel>
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="34"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <Border Width="26" Height="26" CornerRadius="13" Background="{StaticResource AccentBrush}" VerticalAlignment="Top">
+                            <TextBlock Text="1" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <TextBlock Grid.Column="1" Text="{Binding [UsbStep1], Source={x:Static core:Loc.Instance}}" TextWrapping="Wrap" VerticalAlignment="Center" LineHeight="21"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="34"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <Border Width="26" Height="26" CornerRadius="13" Background="{StaticResource AccentBrush}" VerticalAlignment="Top">
+                            <TextBlock Text="2" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <TextBlock Grid.Column="1" Text="{Binding [UsbStep2], Source={x:Static core:Loc.Instance}}" TextWrapping="Wrap" VerticalAlignment="Center" LineHeight="21"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="34"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <Border Width="26" Height="26" CornerRadius="13" Background="{StaticResource AccentBrush}" VerticalAlignment="Top">
+                            <TextBlock Text="3" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <TextBlock Grid.Column="1" x:Name="UsbStep3" TextWrapping="Wrap" VerticalAlignment="Center" LineHeight="21"/>
+                    </Grid>
+                    <Rectangle Height="1" Fill="{StaticResource LineBrush}" Margin="0,2,0,12"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,7">
+                        <Ellipse x:Name="UsbPhoneDot" Width="9" Height="9" Fill="{StaticResource SubtleBrush}" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="UsbPhone" Margin="8,0,0,0" TextWrapping="Wrap" MaxWidth="330" Foreground="{StaticResource SubtleBrush}" FontSize="13"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,7">
+                        <Ellipse x:Name="UsbDriverDot" Width="9" Height="9" Fill="{StaticResource SubtleBrush}" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="UsbDriver" Margin="8,0,0,0" TextWrapping="Wrap" MaxWidth="330" Foreground="{StaticResource SubtleBrush}" FontSize="13"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,7">
+                        <Ellipse x:Name="UsbNetworkDot" Width="9" Height="9" Fill="{StaticResource SubtleBrush}" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="UsbNetwork" Margin="8,0,0,0" TextWrapping="Wrap" MaxWidth="330" Foreground="{StaticResource SubtleBrush}" FontSize="13"/>
+                    </StackPanel>
+                    <Button x:Name="GetAppleDevices" Style="{StaticResource PlainButton}" Content="{Binding [GetAppleDevices], Source={x:Static core:Loc.Instance}}" HorizontalAlignment="Left" Margin="0,6,0,0"
+                            Visibility="Collapsed" Click="GetAppleDevices_Click"/>
+                    <TextBlock Text="{Binding [UsbNote], Source={x:Static core:Loc.Instance}}" TextWrapping="Wrap" Foreground="{StaticResource SubtleBrush}" FontSize="12.5" Margin="0,12,0,0"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+        <Border Background="{StaticResource SurfaceBrush}" CornerRadius="12" Padding="16,12" Margin="0,16,0,0">
+            <StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <Ellipse x:Name="ReceiverDot" Width="10" Height="10" Fill="{StaticResource AmberBrush}" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="ReceiverText" Margin="10,0,0,0" FontWeight="SemiBold" TextWrapping="Wrap" MaxWidth="740"/>
+                </StackPanel>
+                <TextBlock Text="{Binding [FirewallHint], Source={x:Static core:Loc.Instance}}" Foreground="{StaticResource SubtleBrush}" FontSize="12.5" Margin="20,6,0,0" TextWrapping="Wrap"/>
+            </StackPanel>
+        </Border>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+            <Button Style="{StaticResource PlainButton}" Content="{Binding [Reconnect], Source={x:Static core:Loc.Instance}}" Click="Reconnect_Click"/>
+            <Button Style="{StaticResource AccentButton}" Content="{Binding [Close], Source={x:Static core:Loc.Instance}}" IsCancel="True" Click="Close_Click"/>
+        </StackPanel>
+    </StackPanel>
+</Window>

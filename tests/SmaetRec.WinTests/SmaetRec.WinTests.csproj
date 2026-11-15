@@ -17,6 +17,7 @@
     <ProjectReference Include="..\..\src\SmaetRec.Core\SmaetRec.Core.csproj" />
     <ProjectReference Include="..\..\src\SmaetRec.AirPlay\SmaetRec.AirPlay.csproj" />
     <ProjectReference Include="..\..\src\SmaetRec.Media\SmaetRec.Media.csproj" />
+    <ProjectReference Include="..\..\src\SmaetRec.App\SmaetRec.App.csproj" ReferenceOutputAssembly="false" />
     <None Include="Assets\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

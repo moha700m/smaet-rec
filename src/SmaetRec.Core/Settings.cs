@@ -15,6 +15,8 @@ public sealed class AppSettings
     public string? OutputFolder { get; set; }
     public string ReceiverName { get; set; } = "SMAET REC";
     public string? LastProjectPath { get; set; }
+    /// <summary>Whether the computer screen was showing when the app last closed (it is shown again on start).</summary>
+    public bool ScreenWasShown { get; set; }
 
     [JsonIgnore] public int OutputWidth => Quality switch { VideoQuality.Hd720 => 1280, VideoQuality.Uhd4K => 3840, _ => 1920 };
     [JsonIgnore] public int OutputHeight => Quality switch { VideoQuality.Hd720 => 720, VideoQuality.Uhd4K => 2160, _ => 1080 };

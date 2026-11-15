@@ -185,7 +185,7 @@ public sealed class Compositor : IDisposable
                 {
                     ContentBounds = new Vortice.RawRectF(centre.X - radius, centre.Y - radius, centre.X + radius, centre.Y + radius),
                     GeometricMask = lens, MaskAntialiasMode = AntialiasMode.PerPrimitive, MaskTransform = Matrix3x2.Identity, Opacity = 1,
-                }, null);
+                }, null!);
                 // Where the pointer sits on the un-zoomed content, in pixels.
                 float sx = (float)(z.X + pointer.X * z.Width / Scene.CanvasWidth) * _scale;
                 float sy = (float)(z.Y + pointer.Y * z.Height / Scene.CanvasHeight) * _scale;
@@ -233,9 +233,10 @@ public sealed class Compositor : IDisposable
         _dc.DrawTextLayout(new Vector2((float)box.X + 12, (float)box.Y), layout, Solid(Rgb(0xFFFFFF, 0.55f)));
     }
 
-    private void DrawSimulationBadge(FrameState st, RectD box)
+    private void DrawSimulationBadge(FrameState st, RectD box, bool atBottom = false)
     {
-        var badge = new RectD(box.X + 12, box.Y + 12, Math.Min(box.Width - 24, 260), 44);
+        double bw = Math.Min(box.Width - 24, 260);
+        var badge = atBottom ? new RectD(box.Center.X - bw / 2, box.Bottom - 70, bw, 44) : new RectD(box.X + 12, box.Y + 12, bw, 44);
         _dc.FillRoundedRectangle(new RoundedRectangle(RF(badge), 10, 10), Solid(Rgb(0xFF453A, 0.92f)));
         using var layout = _gd.DWrite.CreateTextLayout(st.SimulationLabel, _hintFormat, (float)badge.Width, (float)badge.Height);
         layout.SetFontSize(22, new TextRange { StartPosition = 0, Length = (uint)st.SimulationLabel.Length });
@@ -303,7 +304,7 @@ public sealed class Compositor : IDisposable
             var fitted = RectD.Fit((double)size.Width / size.Height, screen);
             bool exact = Math.Abs(fitted.Width - screen.Width) < screen.Width * 0.03 && Math.Abs(fitted.Height - screen.Height) < screen.Height * 0.03;
             FillWithBitmap(bitmap, exact ? screen : fitted, exact ? screenRadius : 4, world);
-            if (st.PhoneIsSimulated) DrawSimulationBadge(st, screen);
+            if (st.PhoneIsSimulated) DrawSimulationBadge(st, screen, atBottom: true);
         }
         else
         {

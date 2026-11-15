@@ -11,7 +11,7 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
     env:
       SMAET_ARTIFACTS: ${{ github.workspace }}\artifacts
       DOTNET_NOLOGO: true
@@ -20,11 +20,21 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
+      - name: Version
+        id: version
+        shell: pwsh
+        run: |
+          $v = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}".TrimStart("v") } else { "1.0.0" }
+          "value=$v" >> $env:GITHUB_OUTPUT
       - name: Build
-        run: dotnet build SmaetRec.sln -c Release
+        run: dotnet build SmaetRec.sln -c Release -p:Version=${{ steps.version.outputs.value }}
       - name: Unit tests
         run: dotnet test tests/SmaetRec.Tests -c Release --no-build --logger "console;verbosity=normal"
-      - name: Windows tests (capture, recording, decoding)
+      - name: Use a full HD desktop for the screen tests
+        shell: pwsh
+        run: |
+          try { Set-DisplayResolution -Width 1920 -Height 1080 -Force } catch { Write-Host "Could not change the resolution: $_" }
+      - name: Windows tests (drawing, capture, recording, decoding, app start)
         run: dotnet test tests/SmaetRec.WinTests -c Release --no-build --logger "console;verbosity=detailed"
       - name: Upload test pictures and videos
         if: always()
@@ -33,3 +43,46 @@ jobs:
           name: test-output
           path: artifacts
           if-no-files-found: ignore
+      - name: Publish (self-contained, no .NET install needed)
+        run: dotnet publish src/SmaetRec.App -c Release -r win-x64 --self-contained true -p:Version=${{ steps.version.outputs.value }} -o publish/SmaetRec
+      - name: Zip package
+        shell: pwsh
+        run: |
+          Copy-Item README.md, THIRD-PARTY-NOTICES.md publish/SmaetRec/
+          Compress-Archive -Path publish/SmaetRec -DestinationPath "publish/SmaetRec-${{ steps.version.outputs.value }}-win-x64.zip"
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc "/DAppVersion=${{ steps.version.outputs.value }}" installer\SmaetRec.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Installer smoke test (silent install, check files, uninstall)
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem publish\SmaetRec-Setup-*.exe | Select-Object -First 1
+          $p = Start-Process $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installer exit code $($p.ExitCode)" }
+          $exe = "$env:ProgramFiles\SMAET REC\SmaetRec.exe"
+          if (!(Test-Path $exe)) { throw "installed program not found" }
+          Write-Host "Installed: $exe ($((Get-Item $exe).VersionInfo.ProductVersion))"
+          netsh advfirewall firewall show rule name="SMAET REC" | Select-Object -First 6
+          $u = Start-Process "$env:ProgramFiles\SMAET REC\unins000.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -Wait -PassThru
+          if ($u.ExitCode -ne 0) { throw "uninstaller exit code $($u.ExitCode)" }
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmaetRec-installer
+          path: publish/SmaetRec-Setup-*.exe
+      - name: Upload zip package
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmaetRec-portable
+          path: publish/SmaetRec-*-win-x64.zip
+      - name: Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            publish/SmaetRec-Setup-*.exe
+            publish/SmaetRec-*-win-x64.zip
