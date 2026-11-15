@@ -140,8 +140,9 @@ public class MirrorStreamTests
         Assert.Null(decoder.Handle(Header(config.Length, 1, 0, 1170, 2532), config));
         Assert.Equal((1170, 2532), (decoder.Width, decoder.Height));
 
-        // Key frame of odd length, so the next packet starts mid-block of the cipher stream.
+        // Key frame of odd length; the sender starts each packet on a fresh AES block, as iPhones do.
         var idr = Avcc(new byte[] { 0x65, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 });
+        sender.AlignToBlock();
         sender.Process(idr);
         var p1 = decoder.Handle(Header(idr.Length, 0, (5UL << 32) | 0x80000000), idr)!;
         Assert.True(p1.IsKeyFrame);
@@ -149,12 +150,35 @@ public class MirrorStreamTests
         Assert.Equal(new byte[] { 0, 0, 0, 1, 0x67, 1, 2, 3, 0, 0, 0, 1, 0x68, 9, 0, 0, 0, 1, 0x65, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }, p1.Data);
 
         var inter = Avcc(new byte[] { 0x41, 7, 7 }, new byte[] { 0x41, 8 });
+        sender.AlignToBlock();
         sender.Process(inter);
         var p2 = decoder.Handle(Header(inter.Length, 0), inter)!;
         Assert.False(p2.IsKeyFrame);
         Assert.Equal(new byte[] { 0, 0, 0, 1, 0x41, 7, 7, 0, 0, 0, 1, 0x41, 8 }, p2.Data);
 
         Assert.Null(decoder.Handle(Header(3, 5), new byte[3])); // other packet types are ignored
+    }
+
+    [Fact]
+    public void Unpaired_iphone_uses_the_fairplay_key_directly()
+    {
+        var fairplayKey = RandomNumberGenerator.GetBytes(16);
+        const ulong id = 0x0123456789ABCDEF;
+        var packetKey = SHA512.HashData(Encoding.UTF8.GetBytes("AirPlayStreamKey" + id).Concat(fairplayKey).ToArray())[..16];
+        var packetIv = SHA512.HashData(Encoding.UTF8.GetBytes("AirPlayStreamIV" + id).Concat(fairplayKey).ToArray())[..16];
+
+        using var sender = new AesCtrStream(packetKey, packetIv);
+        using var decoder = MirrorStreamDecoder.FromSessionKey(fairplayKey, null, id);
+        byte[] sps = { 0x67, 1, 2, 3 }, pps = { 0x68, 9 };
+        byte[] config = new byte[] { 1, 0x64, 0, 0x1f, 0xff, 0xe1, 0, 4 }.Concat(sps).Concat(new byte[] { 1, 0, 2 }).Concat(pps).ToArray();
+        decoder.Handle(Header(config.Length, 1), config);
+        var frame = Avcc(new byte[] { 0x65, 4, 5, 6 });
+        sender.AlignToBlock();
+        sender.Process(frame);
+        var decoded = decoder.Handle(Header(frame.Length, 0), frame);
+        Assert.NotNull(decoded);
+        Assert.True(decoded!.IsKeyFrame);
+        Assert.Equal(new byte[] { 0, 0, 0, 1, 0x67, 1, 2, 3, 0, 0, 0, 1, 0x68, 9, 0, 0, 0, 1, 0x65, 4, 5, 6 }, decoded.Data);
     }
 
     [Fact]
@@ -301,7 +325,7 @@ public class AdvertisingTests
     private static readonly MdnsService[] Services =
     {
         new("AABBCCDDEEFF@My Studio 2.0", "_raop._tcp", 7000, new[] { ("ch", "2"), ("pk", "00ff") }),
-        new("My Studio 2.0", "_airplay._tcp", 7000, new[] { ("deviceid", "AA:BB:CC:DD:EE:FF"), ("features", "0x5A7FFEE6") }),
+        new("My Studio 2.0", "_airplay._tcp", 7000, new[] { ("deviceid", "AA:BB:CC:DD:EE:FF"), ("features", "0x5A7FFEE6,0x0") }),
     };
 
     [Fact]
@@ -321,7 +345,7 @@ public class AdvertisingTests
         Assert.Equal("smaet-rec-ddeeff.local", srv.Target.ToString());
         var txt = records.OfType<Makaretu.Dns.TXTRecord>().Single(r => r.Name.Labels[0] == "My Studio 2.0");
         Assert.Contains("deviceid=AA:BB:CC:DD:EE:FF", txt.Strings);
-        Assert.Contains("features=0x5A7FFEE6", txt.Strings);
+        Assert.Contains("features=0x5A7FFEE6,0x0", txt.Strings);
         var a = records.OfType<Makaretu.Dns.ARecord>().Single();
         Assert.Equal("192.168.1.20", a.Address.ToString());
         Assert.Equal("smaet-rec-ddeeff.local", a.Name.ToString());

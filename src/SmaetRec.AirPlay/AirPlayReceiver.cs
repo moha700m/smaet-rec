@@ -152,13 +152,13 @@ public sealed class AirPlayReceiver : IDisposable
         string id = DeviceId.Replace(":", "");
         var raop = new MdnsService($"{id}@{Name}", "_raop._tcp", ControlPort, new[]
         {
-            ("ch", "2"), ("cn", "0,1,2,3"), ("da", "true"), ("et", "0,3,5"), ("vv", "2"), ("ft", Features), ("am", Model),
+            ("ch", "2"), ("cn", "0,1,2,3"), ("da", "true"), ("et", "0,3,5"), ("vv", "2"), ("ft", Features + ",0x0"), ("am", Model),
             ("md", "0,1,2"), ("rhd", "5.6.0.0"), ("pw", "false"), ("sr", "44100"), ("ss", "16"), ("sv", "false"),
             ("tp", "UDP"), ("txtvers", "1"), ("sf", "0x4"), ("vs", SourceVersion), ("vn", "65537"), ("pk", pk),
         });
         var airplay = new MdnsService(Name, "_airplay._tcp", ControlPort, new[]
         {
-            ("deviceid", DeviceId), ("features", Features), ("flags", "0x4"), ("model", Model), ("pk", pk),
+            ("deviceid", DeviceId), ("features", Features + ",0x0"), ("pw", "false"), ("flags", "0x4"), ("model", Model), ("pk", pk),
             ("pi", PairingId), ("srcvers", SourceVersion), ("vv", "2"),
         });
         _mdns = new MdnsResponder(new[] { raop, airplay }, "smaet-rec-" + id.ToLowerInvariant()[6..], m => Log?.Invoke(m));
@@ -456,7 +456,7 @@ public sealed class AirPlayReceiver : IDisposable
     {
         Session? s;
         lock (_lock) s = _mirrorSession;
-        if (s?.KeyMessage == null || s.EncryptedKey == null || s.EcdhShared == null)
+        if (s?.KeyMessage == null || s.EncryptedKey == null)
         {
             Log?.Invoke("Mirror data connection without a completed setup; closing");
             return;

@@ -406,7 +406,8 @@ public sealed class StudioEngine : IDisposable
             if (!active) _wake.WaitOne(250);
             else if (next > now) timer.Sleep(next - now);
             now = _time.Elapsed.TotalSeconds;
-            double period = 1.0 / Math.Clamp(Fps, 10, 120);
+            // While idle, 30 fps is enough for a live preview even when 60 fps recording is selected.
+            double period = 1.0 / Math.Clamp(IsRecording ? Fps : Math.Min(Fps, 30), 10, 120);
             next = Math.Max(next + period, now + period * 0.25);
             try
             {
@@ -414,11 +415,18 @@ public sealed class StudioEngine : IDisposable
                 if (_gd == null) { Thread.Sleep(1000); CreateDevice(); RestoreScreenAfterDeviceLoss(); }
                 Tick(now, Math.Min(0.25, now - last));
             }
-            catch (Exception e) when (e is SharpGen.Runtime.SharpGenException or COMException or InvalidOperationException)
+            catch (Exception e) when (e is SharpGen.Runtime.SharpGenException or COMException)
             {
                 Log.Error("Render", e);
                 Error?.Invoke(e.Message);
                 try { DestroyDevice(); } catch (Exception inner) { Log.Error("Device teardown", inner); _gd = null; }
+            }
+            catch (Exception e) when (e is not OutOfMemoryException)
+            {
+                // A managed hiccup should not silently kill the render thread (and with it recording).
+                Log.Error("Render frame", e);
+                Error?.Invoke(e.Message);
+                Thread.Sleep(120);
             }
             last = now;
         }

@@ -18,6 +18,9 @@ public sealed class AesCtrStream : IDisposable
         iv[..16].CopyTo(_counter);
     }
 
+    /// <summary>AirPlay encrypts each mirror packet from a 16-byte block boundary; discard any straddling keystream.</summary>
+    public void AlignToBlock() => _used = 16;
+
     public void Process(Span<byte> data)
     {
         for (int i = 0; i < data.Length; i++)

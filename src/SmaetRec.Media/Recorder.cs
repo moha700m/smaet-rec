@@ -24,6 +24,7 @@ public sealed class Recorder : IDisposable
     private long _videoFrames, _droppedFrames, _audioSamples;
     private volatile string? _error;
     private bool _finished;
+    private readonly object _finishGate = new();
 
     public long VideoFrames => Interlocked.Read(ref _videoFrames);
     public long DroppedFrames => Interlocked.Read(ref _droppedFrames);
@@ -121,7 +122,14 @@ public sealed class Recorder : IDisposable
         sample.SampleTime = timeHns;
         sample.SampleDuration = durationHns;
         Interlocked.Increment(ref _pendingVideo);
-        _queue.Add((sample, false));
+        try { _queue.Add((sample, false)); }
+        catch (InvalidOperationException)
+        {
+            // Finish() completed the queue between the check above and the add.
+            Interlocked.Decrement(ref _pendingVideo);
+            sample.Dispose();
+            return false;
+        }
         return true;
     }
 
@@ -140,7 +148,8 @@ public sealed class Recorder : IDisposable
         buffer.Dispose();
         sample.SampleTime = startFrame * 10_000_000L / AudioRate;
         sample.SampleDuration = sampleFrames * 10_000_000L / AudioRate;
-        _queue.Add((sample, true));
+        try { _queue.Add((sample, true)); }
+        catch (InvalidOperationException) { sample.Dispose(); }
     }
 
     private void WriteLoop()
@@ -160,6 +169,11 @@ public sealed class Recorder : IDisposable
                 _error = e.Message;
                 Log.Error("MP4 write", e);
             }
+            catch (Exception e) when (e is not OutOfMemoryException)
+            {
+                _error = e.Message;
+                Log.Error("MP4 write", e);
+            }
             finally
             {
                 if (!audio) Interlocked.Decrement(ref _pendingVideo);
@@ -171,23 +185,26 @@ public sealed class Recorder : IDisposable
     /// <summary>Finishes the file. Returns null on success, or what went wrong.</summary>
     public string? Finish()
     {
-        if (_finished) return _error;
-        _finished = true;
-        _queue.CompleteAdding();
-        _thread.Join();
-        try
+        lock (_finishGate)
         {
-            if (VideoFrames > 0) _writer.Finalize();
-            else _error ??= "No picture was recorded";
+            if (_finished) return _error;
+            _finished = true;
+            try { _queue.CompleteAdding(); } catch (ObjectDisposedException) { }
+            _thread.Join();
+            try
+            {
+                if (VideoFrames > 0) _writer.Finalize();
+                else _error ??= "No picture was recorded";
+            }
+            catch (Exception e) when (e is not OutOfMemoryException)
+            {
+                _error ??= e.Message;
+                Log.Error("MP4 finish", e);
+            }
+            _writer.Dispose();
+            if (_error != null && VideoFrames == 0) TryDelete(_options.Path);
+            return _error;
         }
-        catch (SharpGen.Runtime.SharpGenException e)
-        {
-            _error ??= e.Message;
-            Log.Error("MP4 finish", e);
-        }
-        _writer.Dispose();
-        if (_error != null && VideoFrames == 0) TryDelete(_options.Path);
-        return _error;
     }
 
     private static void TryDelete(string path)

@@ -85,13 +85,21 @@ public sealed class AudioMixer : IDisposable
     private void OnData(WaveInEventArgs args, WaveFormat format, AudioTimeline line)
     {
         if (_stop || args.BytesRecorded <= 0) return;
-        int channels = format.Channels, bytesPerSample = format.BitsPerSample / 8;
-        if (channels <= 0 || bytesPerSample <= 0) return;
-        bool isFloat = format.Encoding == WaveFormatEncoding.IeeeFloat ||
-                       (format is WaveFormatExtensible ext && ext.SubFormat == new Guid("00000003-0000-0010-8000-00aa00389b71"));
-        int frames = args.BytesRecorded / (channels * bytesPerSample);
-        var stereo = ConvertToStereo(args.Buffer, frames, channels, bytesPerSample, isFloat, new float[frames * 2]);
-        line.Append(stereo, format.SampleRate, NowFrame);
+        try
+        {
+            int channels = format.Channels, bytesPerSample = format.BitsPerSample / 8;
+            if (channels <= 0 || bytesPerSample <= 0) return;
+            bool isFloat = format.Encoding == WaveFormatEncoding.IeeeFloat ||
+                           (format is WaveFormatExtensible ext && ext.SubFormat == new Guid("00000003-0000-0010-8000-00aa00389b71"));
+            int frames = args.BytesRecorded / (channels * bytesPerSample);
+            var stereo = ConvertToStereo(args.Buffer, frames, channels, bytesPerSample, isFloat, new float[frames * 2]);
+            line.Append(stereo, format.SampleRate, NowFrame);
+        }
+        catch (Exception e) when (e is not OutOfMemoryException)
+        {
+            // Exceptions must not escape a WASAPI callback thread: that would terminate the process.
+            Log.Error("Audio data", e);
+        }
     }
 
     public static float[] ConvertToStereo(byte[] buffer, int frames, int channels, int bytesPerSample, bool isFloat, float[] output)
@@ -118,14 +126,21 @@ public sealed class AudioMixer : IDisposable
 
     private void Pump()
     {
-        var mix = new float[Recorder.AudioRate / 5 * 2];
-        var pcm = new short[mix.Length];
-        while (!_stop)
+        try
         {
-            Thread.Sleep(10);
-            WriteUpTo(NowFrame - DelayFrames, mix, pcm);
+            var mix = new float[Recorder.AudioRate / 5 * 2];
+            var pcm = new short[mix.Length];
+            while (!_stop)
+            {
+                Thread.Sleep(10);
+                WriteUpTo(NowFrame - DelayFrames, mix, pcm);
+            }
+            WriteUpTo(NowFrame, mix, pcm); // flush the tail when recording stops
         }
-        WriteUpTo(NowFrame, mix, pcm); // flush the tail when recording stops
+        catch (Exception e) when (e is not OutOfMemoryException)
+        {
+            Log.Error("Audio pump", e);
+        }
     }
 
     private void WriteUpTo(long target, float[] mix, short[] pcm)
@@ -149,9 +164,10 @@ public sealed class AudioMixer : IDisposable
     public void Dispose()
     {
         if (_stop) return;
+        // Set the flag first: a WASAPI callback may be in flight while the devices are stopping.
+        _stop = true;
         try { _mic?.StopRecording(); } catch (Exception e) { Log.Error("Microphone stop", e); }
         try { _loopback?.StopRecording(); } catch (Exception e) { Log.Error("System audio stop", e); }
-        _stop = true;
         _pump?.Join(2000);
         _mic?.Dispose(); _loopback?.Dispose();
         MicrophoneActive = SystemAudioActive = false;

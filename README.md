@@ -106,3 +106,7 @@ dotnet test tests/SmaetRec.WinTests
 The first two work on any OS with the .NET 8 SDK; the Windows tests and running the app need Windows. `--dev-simulated-source` starts the app with moving test pictures (clearly labelled as a simulation) instead of real devices.
 
 Project layout: `SmaetRec.Core` (scene, drawings, projects, text), `SmaetRec.AirPlay` (receiver), `SmaetRec.Media` (capture, compositor, recorder, audio), `SmaetRec.App` (WPF interface). Third-party code is listed in `THIRD-PARTY-NOTICES.md`.
+
+### License
+
+SMAET REC is released under the MIT License (see `LICENSE`). Third-party components keep their own licenses; see `THIRD-PARTY-NOTICES.md`.

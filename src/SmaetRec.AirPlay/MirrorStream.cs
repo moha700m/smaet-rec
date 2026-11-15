@@ -23,16 +23,20 @@ public sealed class MirrorStreamDecoder : IDisposable
     public MirrorStreamDecoder(byte[] streamKey, byte[] streamIv) => _cipher = new AesCtrStream(streamKey, streamIv);
 
     /// <summary>Derives the video stream key/iv exactly as the sender does.</summary>
-    public static MirrorStreamDecoder Create(byte[] fairPlayKeyMessage, byte[] encryptedKey, byte[] ecdhShared, ulong streamConnectionId)
+    public static MirrorStreamDecoder Create(byte[] fairPlayKeyMessage, byte[] encryptedKey, byte[]? ecdhShared, ulong streamConnectionId)
     {
         var aesKey = new byte[16];
         new OmgHax().DecryptAesKey(fairPlayKeyMessage, encryptedKey, aesKey);
         return FromSessionKey(aesKey, ecdhShared, streamConnectionId);
     }
 
-    public static MirrorStreamDecoder FromSessionKey(byte[] aesKey, byte[] ecdhShared, ulong streamConnectionId)
+    /// <summary>
+    /// Derives the picture key. When the iPhone paired with us, the FairPlay key is mixed with the
+    /// ECDH shared secret; older/unpaired clients use the FairPlay key directly.
+    /// </summary>
+    public static MirrorStreamDecoder FromSessionKey(byte[] aesKey, byte[]? ecdhShared, ulong streamConnectionId)
     {
-        var eaesKey = Hashing.Sha512Prefix16(aesKey, ecdhShared);
+        var eaesKey = ecdhShared is { Length: 32 } ? Hashing.Sha512Prefix16(aesKey, ecdhShared) : aesKey;
         var key = Hashing.Sha512Prefix16("AirPlayStreamKey" + streamConnectionId, eaesKey);
         var iv = Hashing.Sha512Prefix16("AirPlayStreamIV" + streamConnectionId, eaesKey);
         return new MirrorStreamDecoder(key, iv);
@@ -56,6 +60,7 @@ public sealed class MirrorStreamDecoder : IDisposable
         }
         if (type != 0) return null;
 
+        _cipher.AlignToBlock();
         _cipher.Process(payload);
         bool key = false;
         int pos = 0;

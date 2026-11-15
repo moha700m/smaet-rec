@@ -35,7 +35,7 @@ jobs:
         run: |
           try { Set-DisplayResolution -Width 1920 -Height 1080 -Force } catch { Write-Host "Could not change the resolution: $_" }
       - name: Windows tests (drawing, capture, recording, decoding, app start)
-        run: dotnet test tests/SmaetRec.WinTests -c Release --no-build --logger "console;verbosity=detailed"
+        run: dotnet test tests/SmaetRec.WinTests -c Release --no-build --blame-crash --results-directory artifacts/test-results --logger "console;verbosity=detailed"
       - name: Upload test pictures and videos
         if: always()
         uses: actions/upload-artifact@v4
@@ -48,7 +48,7 @@ jobs:
       - name: Zip package
         shell: pwsh
         run: |
-          Copy-Item README.md, THIRD-PARTY-NOTICES.md publish/SmaetRec/
+          Copy-Item README.md, THIRD-PARTY-NOTICES.md, LICENSE publish/SmaetRec/
           Compress-Archive -Path publish/SmaetRec -DestinationPath "publish/SmaetRec-${{ steps.version.outputs.value }}-win-x64.zip"
       - name: Build installer
         shell: pwsh
