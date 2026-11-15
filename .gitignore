@@ -1,9 +1,6 @@
 bin/
 obj/
-dist/
-*.user
-*.suo
 .vs/
-src/SmaetRec.Native/bin/
-src/SmaetRec.Native/obj/
-selftest.log
+*.user
+artifacts/
+publish/
