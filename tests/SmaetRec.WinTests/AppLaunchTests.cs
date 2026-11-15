@@ -71,11 +71,16 @@ public class AppLaunchTests(ITestOutputHelper output)
             Assert.True(WaitFor(() => { process.Refresh(); return process.HasExited || process.MainWindowHandle != IntPtr.Zero; }, 30000), "no window appeared");
             Assert.False(process.HasExited, "the application exited right after starting");
             SetForegroundWindow(process.MainWindowHandle);
-            Thread.Sleep(3500); // let the preview, receiver and dialogs settle
+            Thread.Sleep(1500); // let the preview, receiver and dialogs settle
+            process.Refresh();
+            var cpuBefore = process.HasExited ? TimeSpan.Zero : process.TotalProcessorTime;
+            Thread.Sleep(2000);
             process.Refresh();
             Assert.False(process.HasExited, "the application crashed after starting");
             var (pixels, w, h) = GrabScreen();
             SavePng(name + ".png", pixels, w, h);
+            double cpu = (process.TotalProcessorTime - cpuBefore).TotalSeconds / 2.0 / Environment.ProcessorCount * 100;
+            output.WriteLine($"CPU while showing the window: {cpu:F1}% of the machine ({Environment.ProcessorCount} cores)");
             output.WriteLine($"screen {w}x{h}, working set {process.WorkingSet64 / (1024 * 1024)} MB, threads {process.Threads.Count}");
         }
         finally
