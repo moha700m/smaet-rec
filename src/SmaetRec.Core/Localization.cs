@@ -116,6 +116,7 @@ public sealed class Loc : INotifyPropertyChanged
         ["Reconnect"] = ("إعادة الاتصال", "Reconnect"),
         ["Close"] = ("إغلاق", "Close"),
         ["ReceiverRunning"] = ("الكمبيوتر جاهز ويظهر في الآيفون باسم «{0}»", "This computer is ready and appears on the iPhone as “{0}”"),
+        ["ReceiverNoNetwork"] = ("لا توجد شبكة جاهزة — وصّل الكمبيوتر بشبكة Wi-Fi أو بكابل الآيفون", "No network ready — connect this computer to Wi-Fi or the iPhone cable"),
         ["ReceiverFailed"] = ("تعذّر التشغيل: {0}", "Could not start: {0}"),
         ["FirewallHint"] = ("إذا لم يظهر الاسم في الآيفون، اسمح للبرنامج في جدار حماية ويندوز", "If the name does not appear on the iPhone, allow the app in Windows Firewall"),
         ["PhonePlaceholder"] = ("اربط الآيفون", "Connect iPhone"),

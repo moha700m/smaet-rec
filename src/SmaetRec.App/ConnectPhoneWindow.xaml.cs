@@ -37,7 +37,10 @@ public partial class ConnectPhoneWindow : Window
             case ReceiverState.Connected:
                 ReceiverText.Text = Loc.T("PhoneConnected"); ReceiverDot.Fill = Res("GreenBrush"); break;
             case ReceiverState.Waiting:
-                ReceiverText.Text = Loc.T("ReceiverRunning", name); ReceiverDot.Fill = Res("AmberBrush"); break;
+                ReceiverText.Text = _studio.Receiver.AnnouncedAdapters == 0
+                    ? Loc.T("ReceiverNoNetwork")
+                    : Loc.T("ReceiverRunning", name);
+                ReceiverDot.Fill = Res("AmberBrush"); break;
             case ReceiverState.Failed:
                 ReceiverText.Text = Loc.T("ReceiverFailed", _studio.Receiver.LastError ?? ""); ReceiverDot.Fill = Res("RedBrush"); break;
             default:
