@@ -10,6 +10,8 @@
 2. شغّله واضغط «التالي» حتى ينتهي. لا تحتاج لتثبيت أي شيء آخر.
 3. افتح **SMAET REC** من سطح المكتب.
 
+> المثبّت غير موقّع بشهادة تجارية، لذلك قد يظهر تحذير SmartScreen («Windows protected your PC»). اضغط **More info** ثم **Run anyway**. الكود كامل ومفتوح في هذا المستودع.
+
 يوجد أيضًا ملف مضغوط `SmaetRec-…-win-x64.zip` يعمل بدون تثبيت: فُكّ الضغط وشغّل `SmaetRec.exe`.
 
 ## طريقة الاستخدام
@@ -41,6 +43,12 @@
 
 بهذه الطريقة تنتقل الصورة عبر الكابل بدل الواي فاي. نافذة «ربط الآيفون» تعرض حالة كل خطوة.
 
+## ما تم التحقق منه
+
+يُبنى التطبيق ويُختبر تلقائيًا على Windows في كل تحديث: رسم المشهد، التقاط شاشة حقيقية، تسجيل 720p/30 و1080p/60 وقراءة الملف والتحقق من أبعاده ومعدل إطاره ومدته، كتابة المسار الصوتي، فك H.264، جلسة AirPlay حتى إعداد البث مع عميل محاكى، تشغيل الواجهة بالعربية والإنجليزية، وتثبيت المثبّت وإزالته.
+
+لم يتوفر جهاز iPhone حقيقي في بيئة البناء، لذلك لم يُختبر الاستقبال من هاتف فعلي أو إصدار iOS محدد. الاتصال يحتاج شبكة محلية واحدة وسماح جدار الحماية. صوت الآيفون لا يُسجَّل في هذه النسخة.
+
 ## ما يجب أن تعرفه
 
 - **صوت الآيفون لا يُسجَّل** في هذه النسخة. يُسجَّل الميكروفون وصوت الكمبيوتر.
@@ -58,6 +66,8 @@ A simple recording studio for Windows 11: show your iPhone and your computer scr
 ### Install
 
 Download `SmaetRec-Setup-….exe` from [Releases](../../releases) (or from the latest run in the Actions tab) and run it. Nothing else is needed — the .NET runtime is included. A portable `SmaetRec-…-win-x64.zip` is also built: unzip and run `SmaetRec.exe`.
+
+The installer is not commercially code-signed, so SmartScreen may warn (“Windows protected your PC”). Choose **More info → Run anyway**. The full source is in this repository.
 
 Requires Windows 10 version 2004 or later (built for Windows 11), 64-bit.
 
