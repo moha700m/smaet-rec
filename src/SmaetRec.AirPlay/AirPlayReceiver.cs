@@ -3,7 +3,6 @@ using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
-using Makaretu.Dns;
 using Org.BouncyCastle.Math.EC.Rfc7748;
 using Org.BouncyCastle.Math.EC.Rfc8032;
 
@@ -28,9 +27,7 @@ public sealed class AirPlayReceiver : IDisposable
     private readonly byte[] _edPublic = new byte[32];
     private CancellationTokenSource? _cts;
     private TcpListener? _control, _mirror, _events;
-    private MulticastService? _mdns;
-    private ServiceDiscovery? _discovery;
-    private readonly List<ServiceProfile> _profiles = new();
+    private MdnsResponder? _mdns;
     private Session? _mirrorSession;
     private int _activeMirrorStreams;
 
@@ -61,6 +58,7 @@ public sealed class AirPlayReceiver : IDisposable
         lock (_lock)
         {
             Name = string.IsNullOrWhiteSpace(name) ? "SMAET REC" : name.Trim();
+            while (System.Text.Encoding.UTF8.GetByteCount(Name) > 40) Name = Name[..^1];
             DeviceId = FindDeviceId();
             _cts = new CancellationTokenSource();
             try
@@ -101,16 +99,8 @@ public sealed class AirPlayReceiver : IDisposable
         foreach (var l in new[] { _control, _mirror, _events })
             try { l?.Stop(); } catch (SocketException) { }
         _control = _mirror = _events = null;
-        try
-        {
-            if (_discovery != null) foreach (var p in _profiles) _discovery.Unadvertise(p);
-            _discovery?.Dispose();
-            _mdns?.Stop();
-            _mdns?.Dispose();
-        }
-        catch (Exception e) { Log?.Invoke("mDNS stop: " + e.Message); }
-        _profiles.Clear();
-        _discovery = null; _mdns = null; _cts = null; _mirrorSession = null;
+        _mdns?.Dispose();
+        _mdns = null; _cts = null; _mirrorSession = null;
         Interlocked.Exchange(ref _activeMirrorStreams, 0);
     }
 
@@ -159,29 +149,24 @@ public sealed class AirPlayReceiver : IDisposable
     private void StartAdvertising()
     {
         string pk = Convert.ToHexString(_edPublic).ToLowerInvariant();
-        _mdns = new MulticastService();
-        _discovery = new ServiceDiscovery(_mdns);
-
-        var raop = new ServiceProfile($"{DeviceId.Replace(":", "")}@{Name}", "_raop._tcp", (ushort)ControlPort);
-        foreach (var (k, v) in new[]
+        string id = DeviceId.Replace(":", "");
+        var raop = new MdnsService($"{id}@{Name}", "_raop._tcp", ControlPort, new[]
         {
             ("ch", "2"), ("cn", "0,1,2,3"), ("da", "true"), ("et", "0,3,5"), ("vv", "2"), ("ft", Features), ("am", Model),
             ("md", "0,1,2"), ("rhd", "5.6.0.0"), ("pw", "false"), ("sr", "44100"), ("ss", "16"), ("sv", "false"),
             ("tp", "UDP"), ("txtvers", "1"), ("sf", "0x4"), ("vs", SourceVersion), ("vn", "65537"), ("pk", pk),
-        }) raop.AddProperty(k, v);
-
-        var airplay = new ServiceProfile(Name, "_airplay._tcp", (ushort)ControlPort);
-        foreach (var (k, v) in new[]
+        });
+        var airplay = new MdnsService(Name, "_airplay._tcp", ControlPort, new[]
         {
             ("deviceid", DeviceId), ("features", Features), ("flags", "0x4"), ("model", Model), ("pk", pk),
             ("pi", PairingId), ("srcvers", SourceVersion), ("vv", "2"),
-        }) airplay.AddProperty(k, v);
-
-        _profiles.Add(raop); _profiles.Add(airplay);
-        _discovery.Advertise(raop);
-        _discovery.Advertise(airplay);
-        _mdns.Start();
+        });
+        _mdns = new MdnsResponder(new[] { raop, airplay }, "smaet-rec-" + id.ToLowerInvariant()[6..], m => Log?.Invoke(m));
+        if (_mdns.AdapterCount == 0) Log?.Invoke("No network adapter to announce on yet; will keep looking");
     }
+
+    /// <summary>Number of network adapters the receiver is currently announced on (0 means the iPhone cannot find it yet).</summary>
+    public int AnnouncedAdapters => _mdns?.AdapterCount ?? 0;
 
     private async Task AcceptLoop(TcpListener listener, Func<TcpClient, CancellationToken, Task> handler, CancellationToken ct)
     {

@@ -8,7 +8,7 @@ SMAET REC includes or links to the following open-source software.
 | [Vortice.Windows](https://github.com/amerkoleci/Vortice.Windows) | Direct3D 11, Direct2D, DirectWrite, Media Foundation bindings | MIT |
 | [NAudio](https://github.com/naudio/NAudio) | Microphone and system-sound capture (WASAPI) | MIT |
 | [BouncyCastle.Cryptography](https://github.com/bcgit/bc-csharp) | Ed25519 / X25519 for AirPlay pairing | MIT |
-| [Makaretu.Dns.Multicast](https://github.com/richardschneider/net-mdns) | Announcing the receiver on the local network (mDNS) | MIT |
+| [Makaretu.Dns](https://github.com/richardschneider/net-dns) | Tests only: independent parser used to check the mDNS packets | MIT |
 | [.NET runtime and WPF](https://github.com/dotnet) | Application runtime (bundled in the self-contained package) | MIT |
 
 [UxPlay](https://github.com/FDH2/UxPlay) (GPL-3.0) was consulted as documentation of the AirPlay mirroring protocol. No UxPlay code is included.

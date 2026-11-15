@@ -295,3 +295,70 @@ public class ReceiverProtocolTests
         Assert.True(condition());
     }
 }
+
+public class AdvertisingTests
+{
+    private static readonly MdnsService[] Services =
+    {
+        new("AABBCCDDEEFF@My Studio 2.0", "_raop._tcp", 7000, new[] { ("ch", "2"), ("pk", "00ff") }),
+        new("My Studio 2.0", "_airplay._tcp", 7000, new[] { ("deviceid", "AA:BB:CC:DD:EE:FF"), ("features", "0x5A7FFEE6") }),
+    };
+
+    [Fact]
+    public void Announcement_is_valid_dns_that_an_independent_parser_understands()
+    {
+        var packet = MdnsPacket.BuildResponse(Services, "smaet-rec-ddeeff", System.Net.IPAddress.Parse("192.168.1.20"));
+        var message = new Makaretu.Dns.Message();
+        message.Read(packet, 0, packet.Length);
+        Assert.True(message.QR && message.AA);
+        var records = message.Answers;
+        Assert.Equal(9, records.Count);
+
+        var ptr = records.OfType<Makaretu.Dns.PTRRecord>().Single(r => r.Name == "_airplay._tcp.local");
+        Assert.Equal(new[] { "My Studio 2.0", "_airplay", "_tcp", "local" }, ptr.DomainName.Labels);
+        var srv = records.OfType<Makaretu.Dns.SRVRecord>().Single(r => r.Name.Labels[0] == "My Studio 2.0");
+        Assert.Equal(7000, srv.Port);
+        Assert.Equal("smaet-rec-ddeeff.local", srv.Target.ToString());
+        var txt = records.OfType<Makaretu.Dns.TXTRecord>().Single(r => r.Name.Labels[0] == "My Studio 2.0");
+        Assert.Contains("deviceid=AA:BB:CC:DD:EE:FF", txt.Strings);
+        Assert.Contains("features=0x5A7FFEE6", txt.Strings);
+        var a = records.OfType<Makaretu.Dns.ARecord>().Single();
+        Assert.Equal("192.168.1.20", a.Address.ToString());
+        Assert.Equal("smaet-rec-ddeeff.local", a.Name.ToString());
+        Assert.Contains(records.OfType<Makaretu.Dns.PTRRecord>(), r => r.Name == "_services._dns-sd._udp.local" && r.DomainName == "_raop._tcp.local");
+        Assert.All(records, r => Assert.True(r.TTL > TimeSpan.Zero));
+
+        var goodbye = new Makaretu.Dns.Message();
+        var bye = MdnsPacket.BuildResponse(Services, "smaet-rec-ddeeff", System.Net.IPAddress.Parse("192.168.1.20"), goodbye: true);
+        goodbye.Read(bye, 0, bye.Length);
+        Assert.All(goodbye.Answers, r => Assert.Equal(TimeSpan.Zero, r.TTL));
+    }
+
+    [Fact]
+    public void Questions_from_a_real_query_are_read_including_compressed_names()
+    {
+        var query = new Makaretu.Dns.Message();
+        query.Questions.Add(new Makaretu.Dns.Question { Name = "_airplay._tcp.local", Type = Makaretu.Dns.DnsType.PTR });
+        query.Questions.Add(new Makaretu.Dns.Question { Name = "_raop._tcp.local", Type = Makaretu.Dns.DnsType.PTR });
+        var questions = MdnsPacket.ReadQuestions(query.ToByteArray()); // the encoder compresses the repeated "_tcp.local"
+        Assert.Equal(new[] { ("_airplay._tcp.local", MdnsPacket.TypePtr), ("_raop._tcp.local", MdnsPacket.TypePtr) }, questions);
+
+        Assert.Empty(MdnsPacket.ReadQuestions(MdnsPacket.BuildResponse(Services, "h", System.Net.IPAddress.Loopback))); // responses are not questions
+        Assert.Empty(MdnsPacket.ReadQuestions(new byte[] { 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0xC0, 0x0C })); // pointer loop
+        Assert.Empty(MdnsPacket.ReadQuestions(new byte[5]));
+    }
+
+    [Fact]
+    public void Receiver_starts_with_network_announcement_and_stops_cleanly()
+    {
+        using var receiver = new AirPlayReceiver();
+        var log = new List<string>();
+        receiver.Log += log.Add;
+        receiver.Start("My Studio 2.0");
+        Assert.True(receiver.State == ReceiverState.Waiting, "receiver failed: " + receiver.LastError + string.Join("\n", log));
+        Assert.Equal("My Studio 2.0", receiver.Name);
+        receiver.Stop();
+        Assert.Equal(ReceiverState.Stopped, receiver.State);
+        Assert.Equal(0, receiver.AnnouncedAdapters);
+    }
+}
