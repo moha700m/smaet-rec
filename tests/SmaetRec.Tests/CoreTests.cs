@@ -292,3 +292,64 @@ public class ZoomAndTextTests
         Assert.True(dst[2] > 240 && dst[1] < 20 && dst[0] < 20, $"{dst[2]},{dst[1]},{dst[0]}");
     }
 }
+
+public class AudioTimelineTests
+{
+    private static float[] Tone(int frames, float value) => Enumerable.Repeat(value, frames * 2).ToArray();
+
+    [Fact]
+    public void Audio_lands_at_the_time_it_happened_and_gaps_stay_silent()
+    {
+        var line = new AudioTimeline();
+        line.Append(Tone(480, 0.5f), 48000, 480);          // first 10 ms
+        line.Append(Tone(480, 0.25f), 48000, 48000);       // then nothing until just before the 1 s mark
+        var mix = new float[48000 * 2];
+        line.MixInto(mix, 0, 48000);
+        Assert.Equal(0.5f, mix[0]);
+        Assert.Equal(0.5f, mix[479 * 2 + 1]);
+        Assert.Equal(0f, mix[480 * 2]);                     // silence in the gap
+        Assert.Equal(0f, mix[40000 * 2]);
+        Assert.Equal(0.25f, mix[(48000 - 480) * 2]);
+        Assert.Equal(0.25f, mix[47999 * 2]);
+    }
+
+    [Fact]
+    public void Continuous_packets_join_without_gaps_even_with_jitter()
+    {
+        var line = new AudioTimeline();
+        long now = 0;
+        for (int i = 0; i < 50; i++)
+        {
+            now += 480 + (i % 2 == 0 ? 100 : -100);        // packets arrive a little early or late
+            line.Append(Tone(480, 1f), 48000, now);
+        }
+        var mix = new float[480 * 50 * 2];
+        line.MixInto(mix, line.WritePosition - 480 * 50, 480 * 50);
+        Assert.All(mix, v => Assert.Equal(1f, v));
+    }
+
+    [Fact]
+    public void Resamples_44100_to_48000_keeping_duration()
+    {
+        var line = new AudioTimeline();
+        long now = 0;
+        for (int i = 0; i < 100; i++) { now += 480; line.Append(Tone(441, 0.5f), 44100, now); }
+        Assert.InRange(line.WritePosition, 48000 - 600, 48000 + 100);
+        var mix = new float[2000];
+        line.MixInto(mix, line.WritePosition - 1000, 1000);
+        Assert.All(mix, v => Assert.Equal(0.5f, v, 3));
+    }
+
+    [Fact]
+    public void Mixing_adds_sources_and_ignores_ranges_without_data()
+    {
+        var a = new AudioTimeline(); var b = new AudioTimeline();
+        a.Append(Tone(100, 0.25f), 48000, 100);
+        b.Append(Tone(100, 0.5f), 48000, 100);
+        var mix = new float[400];
+        a.MixInto(mix, 0, 200); b.MixInto(mix, 0, 200);
+        Assert.Equal(0.75f, mix[0]);
+        Assert.Equal(0f, mix[300]);
+        a.MixInto(mix, -50, 10); // before the start: nothing, no crash
+    }
+}

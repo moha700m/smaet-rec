@@ -13,6 +13,7 @@ public sealed record VideoPacket(byte[] Data, bool IsKeyFrame, long TimestampMic
 public sealed class MirrorStreamDecoder : IDisposable
 {
     public const int HeaderSize = 128;
+    private static readonly byte[] StartCode = { 0, 0, 0, 1 };
     private readonly AesCtrStream _cipher;
     private byte[]? _parameterSets;
     private bool _parameterSetsPending;
@@ -93,7 +94,7 @@ public sealed class MirrorStreamDecoder : IDisposable
             if (pos + 2 > p.Length) return null;
             int len = BinaryPrimitives.ReadUInt16BigEndian(p[pos..]); pos += 2;
             if (len == 0 || pos + len > p.Length) return null;
-            ms.Write(stackalloc byte[] { 0, 0, 0, 1 }); ms.Write(p.Slice(pos, len)); pos += len;
+            ms.Write(StartCode); ms.Write(p.Slice(pos, len)); pos += len;
         }
         if (pos >= p.Length) return null;
         int ppsCount = p[pos++];
@@ -102,7 +103,7 @@ public sealed class MirrorStreamDecoder : IDisposable
             if (pos + 2 > p.Length) return null;
             int len = BinaryPrimitives.ReadUInt16BigEndian(p[pos..]); pos += 2;
             if (len == 0 || pos + len > p.Length) return null;
-            ms.Write(stackalloc byte[] { 0, 0, 0, 1 }); ms.Write(p.Slice(pos, len)); pos += len;
+            ms.Write(StartCode); ms.Write(p.Slice(pos, len)); pos += len;
         }
         return spsCount > 0 && ppsCount > 0 ? ms.ToArray() : null;
     }

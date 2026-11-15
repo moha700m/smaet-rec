@@ -104,7 +104,7 @@ public sealed class Scene
     public const double CanvasWidth = 1920;
     public const double CanvasHeight = 1080;
     /// <summary>Phone body proportions (portrait), width / height, including the bezel.</summary>
-    public const double PhoneBodyAspect = 0.4875;
+    public const double PhoneBodyAspect = 0.478;
 
     public object Sync { get; } = new();
     public Layer Screen { get; private set; } = new() { Kind = LayerKind.Screen };

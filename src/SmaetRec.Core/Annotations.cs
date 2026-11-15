@@ -20,6 +20,8 @@ public sealed class Annotation
 
     public bool IsFreehand => Kind is AnnotationKind.Pen or AnnotationKind.Highlighter;
     public double FontSize => 18 + Thickness * 4;
+    /// <summary>Arabic/Hebrew text is laid out leftwards from the point that was clicked.</summary>
+    public bool IsRtlText => Text != null && Text.Any(c => c is >= '\u0590' and <= '\u08FF' or >= '\uFB1D' and <= '\uFEFC');
 
     public RectD Bounds
     {
@@ -28,7 +30,10 @@ public sealed class Annotation
             if (Points.Count == 0) return default;
             double x0 = Points.Min(p => p.X), y0 = Points.Min(p => p.Y), x1 = Points.Max(p => p.X), y1 = Points.Max(p => p.Y);
             if (Kind == AnnotationKind.Text)
-                return new RectD(x0, y0, Math.Max(40, (Text?.Length ?? 1) * FontSize * 0.6), FontSize * 1.4);
+            {
+                double w = Math.Max(40, (Text?.Length ?? 1) * FontSize * 0.6);
+                return new RectD(IsRtlText ? x0 - w : x0, y0, w, FontSize * 1.4);
+            }
             return new RectD(x0, y0, x1 - x0, y1 - y0);
         }
     }

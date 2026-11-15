@@ -4,7 +4,6 @@ on:
   push:
     branches: ["**"]
     tags: ["v*"]
-  pull_request:
 
 permissions:
   contents: write
@@ -12,7 +11,10 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
+    env:
+      SMAET_ARTIFACTS: ${{ github.workspace }}\artifacts
+      DOTNET_NOLOGO: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -22,3 +24,12 @@ jobs:
         run: dotnet build SmaetRec.sln -c Release
       - name: Unit tests
         run: dotnet test tests/SmaetRec.Tests -c Release --no-build --logger "console;verbosity=normal"
+      - name: Windows tests (capture, recording, decoding)
+        run: dotnet test tests/SmaetRec.WinTests -c Release --no-build --logger "console;verbosity=detailed"
+      - name: Upload test pictures and videos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-output
+          path: artifacts
+          if-no-files-found: ignore
