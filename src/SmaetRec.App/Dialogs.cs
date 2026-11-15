@@ -13,6 +13,7 @@ internal static class DialogSetup
     public static void Apply(Window window)
     {
         window.Style = (Style)Application.Current.FindResource("DialogWindow");
+        window.WindowStartupLocation = WindowStartupLocation.CenterOwner;
         window.FlowDirection = Loc.Instance.IsRtl ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
         window.SourceInitialized += (_, _) => Ui.UseDarkTitleBar(window);
     }

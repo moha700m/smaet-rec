@@ -123,10 +123,10 @@
             <Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/>
             <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
             <Setter Property="FontSize" Value="11.5"/>
-            <Setter Property="MinWidth" Value="62"/>
+            <Setter Property="MinWidth" Value="56"/>
             <Setter Property="Height" Value="56"/>
-            <Setter Property="Padding" Value="10,4"/>
-            <Setter Property="Margin" Value="4,0"/>
+            <Setter Property="Padding" Value="7,4"/>
+            <Setter Property="Margin" Value="3,0"/>
             <Setter Property="Tag"><Setter.Value><CornerRadius>12</CornerRadius></Setter.Value></Setter>
             <Setter Property="local:Ui.IconSize" Value="20"/>
             <Setter Property="Cursor" Value="Hand"/>
@@ -139,10 +139,10 @@
             <Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/>
             <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
             <Setter Property="FontSize" Value="11.5"/>
-            <Setter Property="MinWidth" Value="62"/>
+            <Setter Property="MinWidth" Value="56"/>
             <Setter Property="Height" Value="56"/>
-            <Setter Property="Padding" Value="10,4"/>
-            <Setter Property="Margin" Value="4,0"/>
+            <Setter Property="Padding" Value="7,4"/>
+            <Setter Property="Margin" Value="3,0"/>
             <Setter Property="Tag"><Setter.Value><CornerRadius>12</CornerRadius></Setter.Value></Setter>
             <Setter Property="local:Ui.IconSize" Value="20"/>
             <Setter Property="Cursor" Value="Hand"/>
@@ -159,7 +159,7 @@
             <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
         </Style>
         <Style x:Key="Separator" TargetType="Rectangle">
-            <Setter Property="Width" Value="1"/><Setter Property="Height" Value="34"/><Setter Property="Margin" Value="10,0"/>
+            <Setter Property="Width" Value="1"/><Setter Property="Height" Value="34"/><Setter Property="Margin" Value="7,0"/>
             <Setter Property="Fill" Value="{StaticResource LineBrush}"/>
         </Style>
         <Style x:Key="DialogWindow" TargetType="Window">
@@ -169,7 +169,6 @@
             <Setter Property="FontSize" Value="14"/>
             <Setter Property="ResizeMode" Value="NoResize"/>
             <Setter Property="ShowInTaskbar" Value="False"/>
-            <Setter Property="WindowStartupLocation" Value="CenterOwner"/>
             <Setter Property="UseLayoutRounding" Value="True"/>
         </Style>
         <Style TargetType="TextBox">
@@ -193,7 +192,7 @@
             <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
         <Style x:Key="SwatchRadio" TargetType="RadioButton">
-            <Setter Property="Width" Value="26"/><Setter Property="Height" Value="26"/><Setter Property="Margin" Value="5,0"/>
+            <Setter Property="Width" Value="24"/><Setter Property="Height" Value="24"/><Setter Property="Margin" Value="5,0"/>
             <Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Template">
                 <Setter.Value>

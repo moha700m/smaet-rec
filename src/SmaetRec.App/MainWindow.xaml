@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:core="clr-namespace:SmaetRec.Core;assembly=SmaetRec.Core"
         xmlns:local="clr-namespace:SmaetRec.App"
-        Title="SMAET REC" Width="1320" Height="860" MinWidth="1040" MinHeight="660"
+        Title="SMAET REC" Width="1320" Height="860" MinWidth="1100" MinHeight="660"
         Background="{StaticResource WindowBrush}" Foreground="{StaticResource TextBrush}" FontFamily="Segoe UI" FontSize="14"
         UseLayoutRounding="True" WindowStartupLocation="CenterScreen" Icon="/Assets/app.ico">
     <Grid>

@@ -59,7 +59,7 @@ public partial class MainWindow : Window
 
         Engine.ScreenChanged += (active, error) => Dispatcher.BeginInvoke(() =>
         {
-            _studio.Settings.ScreenWasShown = active;
+            if (!_studio.Simulated) _studio.Settings.ScreenWasShown = active;
             if (error != null) ShowToast(Loc.T("CaptureFailed", error), null, isError: true);
             RefreshStatus();
         });

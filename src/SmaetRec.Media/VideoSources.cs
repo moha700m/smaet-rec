@@ -78,6 +78,7 @@ public sealed class WgcScreenSource : IVideoSource
             Marshal.ThrowExceptionForHR(CreateDirect3D11DeviceFromDXGIDevice(dxgi.NativePointer, out IntPtr devicePtr));
             try { _winrtDevice = MarshalInterface<IDirect3DDevice>.FromAbi(devicePtr); } finally { Marshal.Release(devicePtr); }
         }
+        RequestBorderlessOnce();
         _poolSize = _item.Size;
         _pool = Direct3D11CaptureFramePool.CreateFreeThreaded(_winrtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, _poolSize);
         _session = _pool.CreateCaptureSession(_item);
@@ -89,6 +90,23 @@ public sealed class WgcScreenSource : IVideoSource
         catch (Exception e) { Log.Write("Capture border could not be hidden: " + e.Message); }
         _session.IsCursorCaptureEnabled = true;
         _session.StartCapture();
+    }
+
+    private static bool _borderlessAsked;
+
+    /// <summary>Windows only lets an app hide the yellow capture border after it has asked for that once.</summary>
+    private static void RequestBorderlessOnce()
+    {
+        if (_borderlessAsked) return;
+        _borderlessAsked = true;
+        try
+        {
+            if (!Windows.Foundation.Metadata.ApiInformation.IsTypePresent("Windows.Graphics.Capture.GraphicsCaptureAccess")) return;
+            var request = GraphicsCaptureAccess.RequestAccessAsync(GraphicsCaptureAccessKind.Borderless).AsTask();
+            if (!request.Wait(1500)) Log.Write("Borderless capture request did not answer in time");
+            else Log.Write("Borderless capture: " + request.Result);
+        }
+        catch (Exception e) { Log.Write("Borderless capture not available: " + e.Message); }
     }
 
     public ID2D1Bitmap? Bitmap => _bitmap;
