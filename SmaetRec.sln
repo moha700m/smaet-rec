@@ -1,0 +1,64 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{B7B50CCD-C6A0-4456-9D7E-311AB758718E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SmaetRec.AirPlay", "src\SmaetRec.AirPlay\SmaetRec.AirPlay.csproj", "{846A6470-440D-4360-81C9-764CC96AFBE7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SmaetRec.App", "src\SmaetRec.App\SmaetRec.App.csproj", "{46657193-944C-4477-A66D-12164DFB63A9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SmaetRec.Core", "src\SmaetRec.Core\SmaetRec.Core.csproj", "{FBA93064-C588-49ED-BE22-BA9BA9CC8483}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SmaetRec.Media", "src\SmaetRec.Media\SmaetRec.Media.csproj", "{8F914C46-BE6C-4EB4-8C1A-353D1105D29C}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{2C0F9DE1-C9BB-48B9-B4FE-AF4E59A18D67}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SmaetRec.Tests", "tests\SmaetRec.Tests\SmaetRec.Tests.csproj", "{A2EE4FFA-740D-4436-84D8-528E6B832A84}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SmaetRec.WinTests", "tests\SmaetRec.WinTests\SmaetRec.WinTests.csproj", "{48E516E1-5628-40E4-95C2-61CDD23EDE28}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{846A6470-440D-4360-81C9-764CC96AFBE7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{846A6470-440D-4360-81C9-764CC96AFBE7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{846A6470-440D-4360-81C9-764CC96AFBE7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{846A6470-440D-4360-81C9-764CC96AFBE7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{46657193-944C-4477-A66D-12164DFB63A9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{46657193-944C-4477-A66D-12164DFB63A9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{46657193-944C-4477-A66D-12164DFB63A9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{46657193-944C-4477-A66D-12164DFB63A9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FBA93064-C588-49ED-BE22-BA9BA9CC8483}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FBA93064-C588-49ED-BE22-BA9BA9CC8483}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FBA93064-C588-49ED-BE22-BA9BA9CC8483}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FBA93064-C588-49ED-BE22-BA9BA9CC8483}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8F914C46-BE6C-4EB4-8C1A-353D1105D29C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8F914C46-BE6C-4EB4-8C1A-353D1105D29C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8F914C46-BE6C-4EB4-8C1A-353D1105D29C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8F914C46-BE6C-4EB4-8C1A-353D1105D29C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A2EE4FFA-740D-4436-84D8-528E6B832A84}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A2EE4FFA-740D-4436-84D8-528E6B832A84}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A2EE4FFA-740D-4436-84D8-528E6B832A84}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A2EE4FFA-740D-4436-84D8-528E6B832A84}.Release|Any CPU.Build.0 = Release|Any CPU
+		{48E516E1-5628-40E4-95C2-61CDD23EDE28}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{48E516E1-5628-40E4-95C2-61CDD23EDE28}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{48E516E1-5628-40E4-95C2-61CDD23EDE28}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{48E516E1-5628-40E4-95C2-61CDD23EDE28}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{846A6470-440D-4360-81C9-764CC96AFBE7} = {B7B50CCD-C6A0-4456-9D7E-311AB758718E}
+		{46657193-944C-4477-A66D-12164DFB63A9} = {B7B50CCD-C6A0-4456-9D7E-311AB758718E}
+		{FBA93064-C588-49ED-BE22-BA9BA9CC8483} = {B7B50CCD-C6A0-4456-9D7E-311AB758718E}
+		{8F914C46-BE6C-4EB4-8C1A-353D1105D29C} = {B7B50CCD-C6A0-4456-9D7E-311AB758718E}
+		{A2EE4FFA-740D-4436-84D8-528E6B832A84} = {2C0F9DE1-C9BB-48B9-B4FE-AF4E59A18D67}
+		{48E516E1-5628-40E4-95C2-61CDD23EDE28} = {2C0F9DE1-C9BB-48B9-B4FE-AF4E59A18D67}
+	EndGlobalSection
+EndGlobal
