@@ -52,17 +52,20 @@ public sealed class DirectUsbCaptureClient : IAsyncDisposable
                 if (length < 2 || length > MaxRecordBytes) throw new InvalidDataException($"Invalid USB IPC record length: {length}.");
                 byte[] record = GC.AllocateUninitializedArray<byte>(length);
                 await ReadExactlyAsync(stream, record, token).ConfigureAwait(false);
-                using var doc = JsonDocument.Parse(record);
+                if (record.Length < 4) throw new InvalidDataException("Truncated USB IPC record.");
+                int headerLength = BinaryPrimitives.ReadInt32LittleEndian(record);
+                if (headerLength <= 1 || headerLength > record.Length - 4) throw new InvalidDataException("Invalid USB IPC header length.");
+                using var doc = JsonDocument.Parse(record.AsMemory(4, headerLength));
                 var root = doc.RootElement;
                 switch (root.GetProperty("type").GetString())
                 {
                     case "status": Status?.Invoke(root.GetProperty("message").GetString() ?? ""); break;
                     case "video":
                     {
-                        int headerBytes = root.GetProperty("headerBytes").GetInt32();
                         int payloadBytes = root.GetProperty("payloadBytes").GetInt32();
-                        if (headerBytes <= 0 || payloadBytes <= 0 || headerBytes + payloadBytes != record.Length) throw new InvalidDataException("Inconsistent video IPC lengths.");
-                        VideoAccessUnit?.Invoke(record.AsSpan(headerBytes, payloadBytes).ToArray(), root.GetProperty("timestampMicros").GetInt64(), root.GetProperty("keyFrame").GetBoolean());
+                        int payloadOffset = 4 + headerLength;
+                        if (payloadBytes <= 0 || payloadOffset + payloadBytes != record.Length) throw new InvalidDataException("Inconsistent video IPC lengths.");
+                        VideoAccessUnit?.Invoke(record.AsSpan(payloadOffset, payloadBytes).ToArray(), root.GetProperty("timestampMicros").GetInt64(), root.GetProperty("keyFrame").GetBoolean());
                         break;
                     }
                     case "error": throw new IOException(root.GetProperty("message").GetString() ?? "USB host error.");
