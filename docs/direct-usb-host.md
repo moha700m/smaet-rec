@@ -65,6 +65,7 @@ notices, and corresponding source archive.
 
 - Windows 10/11 x64.
 - An Apple USB INF package in DriverStore (`appleusb.inf`, `usbaapl64.inf`, or `usbaapl.inf`) and a running `Apple Mobile Device Service`. Photos/File Explorer access alone does not prove both are installed.
+- The iPhone composite USB parent should remain bound to Windows `USB Composite Device` (`usbccgp`). The driver manager can inspect and, only after explicit confirmation, restore an unexpected parent binding. Do not use Zadig or manually replace the parent with WinUSB/libusb.
 - Data-capable USB cable; iPhone unlocked; accept “Trust This Computer”.
 - The upstream-compatible per-device `libusb0` capture filter. The “USB driver setup / repair” button opens iPhoneMirror's standalone driver manager, which separately diagnoses and can install/repair Apple USB support and the capture filter; it may request administrator consent or a restart. Apple packages are downloaded from Apple/Microsoft sources and are not redistributed in SMAET REC.
 - If the iPhone appears in Photos/File Explorer but not in iTunes/Apple Devices, first inspect the Apple INF and service in the connection window, then use “USB driver setup / repair”. The driver manager reports the missing component instead of treating photo transfer as proof that the mirroring stack is healthy.
