@@ -75,7 +75,7 @@ public static class UsbPhoneDetector
             foreach (var id in new string(buffer).Split('\\0', StringSplitOptions.RemoveEmptyEntries))
             {
                 if (!id.Contains("VID_05AC&PID_12", StringComparison.OrdinalIgnoreCase)) continue;
-                int slash = id.LastIndexOf('\\\\');
+                int slash = id.LastIndexOf('\\');
                 if (slash < 0 || slash == id.Length - 1) continue;
                 string serial = id[(slash + 1)..].Trim();
                 if (serial.Length >= 16 && serial.Length <= 48 &&
