@@ -39,7 +39,7 @@ jobs:
       - name: Stage USB runtime and license
         shell: pwsh
         run: |
-          $usb = "src/SmaetRec.App/resources/usb"
+          $usb = "src/SmaetRec.App/usb"
           New-Item -ItemType Directory -Force $usb | Out-Null
           Copy-Item "build/usb-host/package/usb/*" $usb -Force
           Copy-Item "usb-host/LICENSE-GPL-3.0.txt" "$usb/LICENSE-GPL-3.0.txt" -Force
