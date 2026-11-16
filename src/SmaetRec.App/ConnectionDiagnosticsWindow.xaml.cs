@@ -124,7 +124,7 @@ public partial class ConnectionDiagnosticsWindow : Window
             FirewallDot.Fill = Res(_firewall switch { true => "GreenBrush", false => "RedBrush", _ => "AmberBrush" });
 
             _usb = await Task.Run(UsbPhoneDetector.Check);
-            if (_usb.AppleDriverInstalled)
+            if (_usb.AppleSupportInstalled)
             {
                 DriverText.Text = Loc.T("DiagAppleSupportInstalled");
                 DriverDot.Fill = Res("GreenBrush");
