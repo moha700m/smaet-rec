@@ -149,12 +149,13 @@ public sealed class Studio : IDisposable
             H264Decoder? old;
             lock (_decoderLock) { old = _decoder; _decoder = null; _firstPacketTimestamp = null; _lastPacketPts = -1; }
             old?.Dispose();
-            if (!Engine.PhoneFrames.IsSimulated) Engine.PhoneFrames.Clear();
+            if (_usbClient == null && !Engine.PhoneFrames.IsSimulated) Engine.PhoneFrames.Clear();
         }
         PhoneStateChanged?.Invoke();
     }
 
-    public bool PhoneConnected => Receiver.State == ReceiverState.Connected || _usbClient != null || Engine.PhoneFrames.IsSimulated;
+    public bool UsbConnected => _usbClient != null;
+    public bool PhoneConnected => Receiver.State == ReceiverState.Connected || UsbConnected || Engine.PhoneFrames.IsSimulated;
 
     /// <summary>Pictures the Windows decoder has produced for the current iPhone session.</summary>
     public long PhoneFramesDecoded { get { lock (_decoderLock) return _decoder?.FramesDecoded ?? 0; } }
