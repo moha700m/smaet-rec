@@ -165,3 +165,6 @@ Project layout: `SmaetRec.Core` (scene, drawings, projects, text), `SmaetRec.Air
 ### License
 
 SMAET REC is released under the MIT License (see `LICENSE`). Third-party components keep their own licenses; see `THIRD-PARTY-NOTICES.md`.
+
+
+إذا كان 3uTools يعرض شاشة الآيفون بالفعل لكن اتصال SMAET REC المباشر لا يكتمل، استخدم حلًا مؤقتًا بدون OBS: افتح **Toolbox → Realtime Screen** داخل 3uTools، ثم في SMAET REC اختر **شاشة الكمبيوتر → نافذة** وحدد نافذة Realtime Screen. لا تحذف تعريفات 3uTools التي تعمل قبل تشخيص خدمة Apple وربط جهاز USB الأب.
