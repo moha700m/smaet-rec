@@ -78,7 +78,7 @@ public static class UsbPhoneDetector
             var buffer = new char[length];
             if (CM_Get_Device_ID_List("USB", buffer, length, filterEnumerator | filterPresent) != 0)
                 return null;
-            foreach (var id in new string(buffer).Split('\\0', StringSplitOptions.RemoveEmptyEntries))
+            foreach (var id in new string(buffer).Split('\0', StringSplitOptions.RemoveEmptyEntries))
             {
                 if (!id.Contains("VID_05AC&PID_12", StringComparison.OrdinalIgnoreCase) ||
                     id.Contains("&MI_", StringComparison.OrdinalIgnoreCase)) continue;
