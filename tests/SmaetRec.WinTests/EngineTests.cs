@@ -277,6 +277,97 @@ public class EngineTests(ITestOutputHelper output)
         Assert.InRange(c.r, 32 - 14, 32 + 14);
     }
 
+    private static List<byte[]> AccessUnits(string asset)
+    {
+        var stream = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Assets", asset));
+        var units = new List<byte[]>();
+        int start = 0;
+        for (int i = 4; i + 4 < stream.Length; i++)
+            if (stream[i] == 0 && stream[i + 1] == 0 && stream[i + 2] == 0 && stream[i + 3] == 1 && (stream[i + 4] & 0x1F) == 9)
+            { units.Add(stream[start..i]); start = i; }
+        units.Add(stream[start..]);
+        return units;
+    }
+
+    /// <summary>
+    /// The test clips have four solid quadrants (red, green / blue, yellow). Checks the colours and that the
+    /// borders between them are straight, which catches slanted, torn or colour-shifted decoding.
+    /// </summary>
+    private static string? CheckQuadrants(byte[] px, int w, int h)
+    {
+        int hw = w / 2 / 2 * 2, hh = h / 2 / 2 * 2;
+        (int b, int g, int r) red = (40, 40, 200), green = (40, 200, 40), blue = (200, 40, 40), yellow = (40, 200, 200);
+        string? Near(int x, int y, (int b, int g, int r) want, string what)
+        {
+            var c = Pixel(px, w, x, y);
+            bool ok = Math.Abs(c.b - want.b) <= 28 && Math.Abs(c.g - want.g) <= 28 && Math.Abs(c.r - want.r) <= 28;
+            return ok ? null : $"{what} at ({x},{y}) is b={c.b} g={c.g} r={c.r}, expected about b={want.b} g={want.g} r={want.r}";
+        }
+        foreach (double fy in new[] { 0.04, 0.2, 0.35, 0.46 })
+        {
+            int yTop = (int)(h * fy), yBottom = hh + (int)((h - hh) * (fy * 2));
+            if (yBottom >= h - 2) yBottom = h - 3;
+            foreach (var problem in new[]
+            {
+                Near(6, yTop, red, "top-left"), Near(hw - 8, yTop, red, "top-left near the middle"),
+                Near(hw + 8, yTop, green, "top-right near the middle"), Near(w - 7, yTop, green, "top-right"),
+                Near(6, yBottom, blue, "bottom-left"), Near(hw - 8, yBottom, blue, "bottom-left near the middle"),
+                Near(hw + 8, yBottom, yellow, "bottom-right near the middle"), Near(w - 7, yBottom, yellow, "bottom-right"),
+            })
+                if (problem != null) return problem;
+        }
+        return Near(w / 4, hh - 8, red, "top-left just above the middle") ?? Near(w / 4, hh + 8, blue, "bottom-left just below the middle");
+    }
+
+    [Theory]
+    [InlineData("quad-664x1440.h264", 664, 1440)]
+    [InlineData("quad-886x1920.h264", 886, 1920)]
+    [InlineData("quad-590x1278.h264", 590, 1278)]
+    [InlineData("quad-1170x2532.h264", 1170, 2532)]
+    [InlineData("quad-1440x664.h264", 1440, 664)]
+    public void Phone_sized_video_is_decoded_without_distortion(string asset, int width, int height)
+    {
+        var units = AccessUnits(asset);
+        var frames = new MemoryFrameSource();
+        using (var decoder = new H264Decoder(frames))
+        {
+            long t = 0;
+            foreach (var unit in units) { decoder.Push(unit, t, isKeyFrame: ContainsNal(unit, 5)); t += 33_333; }
+            WaitFor(() => decoder.FramesDecoded >= units.Count - 3 || decoder.Error != null, 15000);
+            output.WriteLine($"decoded {decoder.FramesDecoded} of {units.Count}, size {decoder.Width}x{decoder.Height}, error: {decoder.Error}");
+            Assert.True(decoder.Error == null, "decoder failed: " + decoder.Error);
+            Assert.True(decoder.FramesDecoded >= units.Count - 3, "decoder produced too few pictures");
+        }
+        Assert.True(frames.TryCopyLatest(out var pixels, out int w, out int h));
+        SavePng($"decoded-{width}x{height}.png", pixels, w, h);
+        Assert.Equal((width, height), (w, h));
+        Assert.Null(CheckQuadrants(pixels, w, h));
+    }
+
+    [Fact]
+    public void Rotating_the_phone_mid_stream_keeps_the_picture_right()
+    {
+        var frames = new MemoryFrameSource();
+        var sizes = new List<(int, int)>();
+        using var decoder = new H264Decoder(frames);
+        decoder.SizeChanged += (w, h) => { lock (sizes) sizes.Add((w, h)); };
+        long t = 0;
+        foreach (var (asset, w, h) in new[] { ("quad-664x1440.h264", 664, 1440), ("quad-1440x664.h264", 1440, 664), ("quad-664x1440.h264", 664, 1440) })
+        {
+            long before = decoder.FramesDecoded;
+            var units = AccessUnits(asset);
+            foreach (var unit in units) { decoder.Push(unit, t, isKeyFrame: ContainsNal(unit, 5)); t += 33_333; }
+            Assert.True(WaitFor(() => decoder.FramesDecoded >= before + units.Count - 4 || decoder.Error != null, 15000), $"stalled after switching to {w}x{h}");
+            Assert.True(decoder.Error == null, "decoder failed: " + decoder.Error);
+            Assert.True(WaitFor(() => frames.TryCopyLatest(out _, out int cw, out int ch) && (cw, ch) == (w, h), 5000), $"picture never became {w}x{h}");
+            Assert.True(frames.TryCopyLatest(out var pixels, out int fw, out int fh));
+            SavePng($"decoded-rotation-{sizes.Count}-{w}x{h}.png", pixels, fw, fh);
+            Assert.Null(CheckQuadrants(pixels, fw, fh));
+        }
+        output.WriteLine("sizes reported: " + string.Join(", ", sizes));
+        Assert.Equal(new[] { (664, 1440), (1440, 664), (664, 1440) }, sizes);
+    }
+
     private static bool ContainsNal(byte[] data, int type)
     {
         for (int i = 0; i + 4 < data.Length; i++)
