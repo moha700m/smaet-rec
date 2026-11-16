@@ -126,12 +126,12 @@ public partial class ConnectionDiagnosticsWindow : Window
             _usb = await Task.Run(UsbPhoneDetector.Check);
             if (_usb.AppleDriverInstalled)
             {
-                DriverText.Text = Loc.T("DiagDriverInstalled");
+                DriverText.Text = Loc.T("DiagAppleSupportInstalled");
                 DriverDot.Fill = Res("GreenBrush");
             }
             else
             {
-                DriverText.Text = Loc.T("DiagDriverMissing");
+                DriverText.Text = Loc.T("DiagAppleSupportMissing");
                 DriverDot.Fill = Res("AmberBrush");
             }
         }
