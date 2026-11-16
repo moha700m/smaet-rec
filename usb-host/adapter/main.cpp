@@ -246,7 +246,7 @@ int Run(const std::wstring& pipeName, const std::wstring& requestedSerial) {
                     case iPhoneMirror::CaptureState::Stopped: stage = L"iPhone USB capture session stopped."; break;
                     default: stage = L"Preparing the iPhone USB video stream."; break;
                     }
-                    if (status.message[0] != L'\\0') stage += L" " + std::wstring(status.message);
+                    if (status.message[0] != L'\0') stage += L" " + std::wstring(status.message);
                     SendStatus(stage);
                     lastAnnouncedState = stateValue;
                 }
