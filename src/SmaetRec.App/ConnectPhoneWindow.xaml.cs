@@ -15,6 +15,7 @@ public partial class ConnectPhoneWindow : Window
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1.5) };
     private bool _checking;
     private bool _usbConnecting;
+    private bool _usbReady;
     private string? _usbDeviceId;
     private ConnectionDiagnosticsWindow? _diagnostics;
 
@@ -56,6 +57,7 @@ public partial class ConnectPhoneWindow : Window
         {
             var usb = await Task.Run(UsbPhoneDetector.Check);
             _usbDeviceId = usb.DeviceId;
+            _usbReady = usb.Ready;
             ConnectUsb.IsEnabled = usb.Ready && _usbDeviceId != null && !_usbConnecting && !_studio.UsbSessionActive;
             ConnectUsb.Content = _studio.UsbConnected ? "USB streaming" : _studio.UsbSessionActive ? "Waiting for video..." : "Connect USB";
             Set(UsbPhone, UsbPhoneDot, usb.PhonePluggedIn, Loc.T(usb.PhonePluggedIn ? "UsbPhoneFound" : "UsbPhoneMissing"));
@@ -81,7 +83,7 @@ public partial class ConnectPhoneWindow : Window
         _usbConnecting = true; ConnectUsb.IsEnabled = false; ConnectUsb.Content = "Connecting...";
         try { await _studio.ConnectUsbAsync(_usbDeviceId); ConnectUsb.Content = "Waiting for video..."; }
         catch (Exception ex) { ConnectUsb.Content = "Connect USB"; MessageBox.Show(this, ex.Message, "Direct USB capture", MessageBoxButton.OK, MessageBoxImage.Warning); }
-        finally { _usbConnecting = false; ConnectUsb.IsEnabled = _usbDeviceId != null && !_studio.UsbSessionActive; }
+        finally { _usbConnecting = false; ConnectUsb.IsEnabled = _usbReady && _usbDeviceId != null && !_studio.UsbSessionActive; }
     }
 
     private void Diagnose_Click(object sender, RoutedEventArgs e)
