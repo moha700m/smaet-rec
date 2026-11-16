@@ -57,7 +57,7 @@ public partial class ConnectPhoneWindow : Window
             var usb = await Task.Run(UsbPhoneDetector.Check);
             _usbDeviceId = usb.DeviceId;
             ConnectUsb.IsEnabled = _usbDeviceId != null && !_usbConnecting;
-            ConnectUsb.Content = _studio.PhoneConnected && _usbDeviceId != null ? "USB connected" : "Connect USB";
+            ConnectUsb.Content = _studio.UsbConnected ? "USB connected" : "Connect USB";
             Set(UsbPhone, UsbPhoneDot, usb.PhonePluggedIn, Loc.T(usb.PhonePluggedIn ? "UsbPhoneFound" : "UsbPhoneMissing"));
             Set(UsbDriver, UsbDriverDot, usb.AppleDriverInstalled, Loc.T(usb.AppleDriverInstalled ? "UsbDriverFound" : "UsbDriverMissing"));
             Set(UsbNetwork, UsbNetworkDot, usb.NetworkAddress != null, usb.NetworkAddress != null ? Loc.T("UsbNetworkUp", usb.NetworkAddress) : Loc.T("UsbNetworkDown"));
