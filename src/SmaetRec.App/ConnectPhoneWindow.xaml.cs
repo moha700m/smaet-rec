@@ -137,7 +137,8 @@ public partial class ConnectPhoneWindow : Window
 
             if (Owner is MainWindow main)
             {
-                main.ShowCapturedWindow(picker.Selected);
+                main.ShowCapturedWindow(picker.Selected, fullCanvas: true);
+                Close();
                 main.Activate();
             }
             else
