@@ -76,14 +76,14 @@ No fake frames or AirPlay fallback are used by the USB path. A real-device
 acceptance test is required before claiming hardware compatibility.
 
 
-## Immediate USB mirroring fallback (no OBS)
+## Integrated 3uTools Realtime Screen fallback (no OBS)
 
-If 3uTools already detects the phone but SMAET REC's direct USB handshake does not start, use the working 3uTools capture as a temporary source instead of repeatedly changing drivers:
+If 3uTools already detects the iPhone but SMAET REC direct USB capture does not start, use the integrated external-window capture path:
 
-1. Open 3uTools and connect/unlock the iPhone over USB.
-2. Open **Toolbox → Realtime Screen** in 3uTools. Its live screen viewer is documented by 3uTools: https://www.3u.com/tutorial/details/145/how-to-view-the-realtime-screen-of-your-idevice-using-3utools
-3. In SMAET REC choose **Computer screen → Window**, then select the 3uTools Realtime Screen window. SMAET REC records that window using its built-in Windows capture path; OBS is not required.
+1. Open SMAET REC's **Connect iPhone** window and press **iPhone screen via 3uTools**. SMAET REC activates the installed 3uTools app, or launches it when found in the usual installation path or Windows App Paths registry.
+2. The 3uTools window picker stays open and refreshes its list every 1.2 seconds. Switch to 3uTools and choose **Toolbox → Realtime Screen**. Keep the viewer window visible and not minimized.
+3. Return to the picker and select the Realtime Screen window. SMAET REC passes its actual window handle to its existing Windows Graphics Capture pipeline (GDI fallback remains available), so it appears in the normal preview scene and can use the existing layout, drawing, effects, and MP4 recorder. OBS and an intermediate recording file are not involved.
 
-Another wired USB option is the official 3uAirPlayer receiver: https://www.3u.com/airplayer. Its wired mode uses USB and does not require Wi-Fi; after opening its iPhone viewer window, select that window through SMAET REC's **Computer screen → Window** capture. Keep this as a fallback until direct USB is confirmed on the target PC.
+The 3uTools Realtime Screen entry point is documented by 3uTools as **Toolbox → Realtime Screen**: https://www.3u.com/tutorial/details/145/how-to-view-the-realtime-screen-of-your-idevice-using-3utools. The current 3uTools instructions document this in-app navigation; SMAET REC does not rely on an undocumented 3uTools command-line switch. The user opens the viewer in 3uTools, while SMAET REC handles discovery and live window capture.
 
-Do not uninstall 3uTools or replace its working Apple/USB device binding just to test SMAET REC. First run the read-only diagnostics above and save the displayed Apple USB/service/parent-driver states.
+Do not uninstall 3uTools or replace its working Apple/USB device binding just to test direct SMAET REC USB. This external-window path is separate from direct USB capture and does not claim that the native USB handshake is repaired.
