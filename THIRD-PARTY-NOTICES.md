@@ -14,3 +14,5 @@ SMAET REC includes or links to the following open-source software.
 [UxPlay](https://github.com/FDH2/UxPlay) (GPL-3.0) was consulted as documentation of the AirPlay mirroring protocol. No UxPlay code is included.
 
 AirPlay, iPhone and Apple TV are trademarks of Apple Inc. SMAET REC is not affiliated with or endorsed by Apple.
+
+| [iPhoneMirror](https://github.com/RayrenSX/iPhoneMirror) | Separate optional USB QuickTime host source in `third_party/iphone-usb-host` (Git submodule; not linked into the MIT application assembly) | GPL-3.0; see upstream LICENSE and notices |
