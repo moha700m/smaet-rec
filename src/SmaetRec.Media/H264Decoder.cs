@@ -30,7 +30,10 @@ public sealed class H264Decoder : IDisposable
 
     public int Width => _width;
     public int Height => _height;
+    /// <summary>Pictures turned into pixels and handed to the screen.</summary>
     public long FramesDecoded => Interlocked.Read(ref _decoded);
+    /// <summary>Pictures the Windows decoder produced, shown or not. It always holds the newest one back until the next packet arrives.</summary>
+    public long PicturesDecoded => Interlocked.Read(ref _outputs);
     public string? Error { get; private set; }
     /// <summary>Packets thrown away because the computer could not keep up. Any non-zero value means the picture may be damaged until the phone sends a fresh key frame.</summary>
     public long PacketsDropped => Interlocked.Read(ref _dropped);
