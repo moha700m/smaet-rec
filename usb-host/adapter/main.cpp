@@ -15,7 +15,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <cwctype>
-#include <string_view>
 #include <iostream>
 #include <limits>
 #include <string>
@@ -46,7 +45,7 @@ std::wstring Normalize(std::wstring value) {
     value.erase(std::remove_if(value.begin(), value.end(), [](wchar_t c) {
         return !std::iswalnum(c);
     }), value.end());
-    std::transform(value.begin(), value.end(), value.begin(), towlower);
+    std::transform(value.begin(), value.end(), value.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
     return value;
 }
 
@@ -78,7 +77,7 @@ std::string ToUtf8(const std::wstring& value) {
     const int count = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
         static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
     if (count <= 0) return "Native USB error";
-    std::string utf8(static_cast<std::size_t>(count), '\\0');
+    std::string utf8(static_cast<std::size_t>(count), '\0');
     WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
         static_cast<int>(value.size()), utf8.data(), count, nullptr, nullptr);
     return utf8;
@@ -89,7 +88,7 @@ std::string JsonEscape(std::string_view value) {
     escaped.reserve(value.size() + 16);
     constexpr char hex[] = "0123456789abcdef";
     for (unsigned char c : value) {
-        if (c == '"' || c == '\\\\') { escaped.push_back('\\\\'); escaped.push_back(static_cast<char>(c)); }
+        if (c == '"' || c == '\\') { escaped.push_back('\\'); escaped.push_back(static_cast<char>(c)); }
         else if (c < 0x20) {
             escaped += "\\u00";
             escaped.push_back(hex[c >> 4]);
@@ -100,13 +99,13 @@ std::string JsonEscape(std::string_view value) {
 }
 
 bool SendStatus(const std::wstring& message) {
-    return SendRecord("{\\"type\\":\\"status\\",\\"message\\":\\"" +
-        JsonEscape(ToUtf8(message)) + "\\"}");
+    return SendRecord("{\"type\":\"status\",\"message\":\"" +
+        JsonEscape(ToUtf8(message)) + "\"}");
 }
 
 bool SendError(const std::wstring& message) {
-    return SendRecord("{\\"type\\":\\"error\\",\\"message\\":\\"" +
-        JsonEscape(ToUtf8(message)) + "\\"}");
+    return SendRecord("{\"type\":\"error\",\"message\":\"" +
+        JsonEscape(ToUtf8(message)) + "\"}");
 }
 
 bool ConnectPipe(const std::wstring& name) {
