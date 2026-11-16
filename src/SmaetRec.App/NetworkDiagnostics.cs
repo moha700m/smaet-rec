@@ -22,7 +22,12 @@ public static class NetworkDiagnostics
     {
         const string script = """
             $p = Get-NetConnectionProfile -ErrorAction SilentlyContinue |
-                 Select-Object Name,InterfaceAlias,NetworkCategory,IPv4Connectivity
+                 Sort-Object @{ Expression = {
+                     if ($_.IPv4Connectivity -eq 'Internet') { 0 }
+                     elseif ($_.IPv4Connectivity -eq 'LocalNetwork') { 1 }
+                     else { 2 }
+                 } } |
+                 Select-Object -First 1 Name,InterfaceAlias,NetworkCategory,IPv4Connectivity
             if ($p) { $p | ConvertTo-Json -Compress }
             """;
         string? json = await RunPowerShellAsync(script, 6000).ConfigureAwait(false);

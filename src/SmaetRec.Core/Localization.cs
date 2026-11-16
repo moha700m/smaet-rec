@@ -147,7 +147,7 @@ public sealed class Loc : INotifyPropertyChanged
         ["DiagDriverMissing"] = ("تعريفات Apple غير مثبتة — لازمة فقط لطريقة USB", "Apple device software missing — only needed for the USB method"),
         ["Unknown"] = ("خطأ غير معروف", "unknown error"),
         ["ReceiverFailed"] = ("تعذّر التشغيل: {0}", "Could not start: {0}"),
-        ["FirewallHint"] = ("إذا لم يظهر الاسم في الآيفون، اسمح للبرنامج في جدار حماية ويندوز", "If the name does not appear on the iPhone, allow the app in Windows Firewall"),
+        ["FirewallHint"] = ("إذا لم يظهر الاسم في الآيفون، اضغط «تشخيص الاتصال» ثم «إصلاح الاتصال» ليضيف قاعدة جدار الحماية تلقائيًا.", "If the name does not appear on the iPhone, open “Connection diagnostics” and press “Repair connection” to add the firewall rule automatically."),
         ["PhonePlaceholder"] = ("اربط الآيفون", "Connect iPhone"),
         ["ScreenPlaceholder"] = ("اضغط «شاشة الكمبيوتر»", "Press “Computer screen”"),
         // screen picker

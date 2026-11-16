@@ -80,7 +80,21 @@ public sealed class Studio : IDisposable
 
     private void OnReceiverState(ReceiverState state)
     {
-        if (state != ReceiverState.Connected)
+        if (state == ReceiverState.Connected)
+        {
+            // A previous session may have left the phone layer hidden or dragged off the canvas.
+            bool offCanvas;
+            lock (Scene.Sync)
+            {
+                Scene.Phone.Visible = true;
+                var p = Scene.Phone;
+                offCanvas = p.CenterX + p.Width / 2 < 0 || p.CenterX - p.Width / 2 > Scene.CanvasWidth
+                         || p.CenterY + p.Height / 2 < 0 || p.CenterY - p.Height / 2 > Scene.CanvasHeight;
+            }
+            if (offCanvas) Scene.ResetLayout();
+            else Scene.NotifyChanged();
+        }
+        else
         {
             H264Decoder? old;
             lock (_decoderLock) { old = _decoder; _decoder = null; }
