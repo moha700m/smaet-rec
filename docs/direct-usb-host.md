@@ -12,9 +12,9 @@ The application-side IPC adapter is original SMAET REC code under the repository
 
 The helper is expected at `resources/usb/iphone-usb-host.exe` and is launched with `--smaet-ipc --pipe <pipe-name> --device <UDID> --video h264-annexb`.
 
-Each record consists of a 4-byte unsigned little-endian length, followed by a UTF-8 JSON object and optional binary payload. Status: `{"type":"status","message":"..."}`. Error: `{"type":"error","message":"..."}`. End: `{"type":"stopped"}`.
+Each record consists of a 4-byte unsigned little-endian total length, then a 4-byte unsigned little-endian JSON-header length, then that many UTF-8 JSON bytes, then the optional binary payload. Status: `{"type":"status","message":"..."}`. Error: `{"type":"error","message":"..."}`. End: `{"type":"stopped"}`.
 
-Video record JSON fields: `type=video`, `headerBytes`, `payloadBytes`, `timestampMicros`, and `keyFrame`. The JSON object is the first headerBytes of the record, followed by exactly payloadBytes of H.264 Annex-B access-unit data.
+Video record JSON fields: `type=video`, `payloadBytes`, `timestampMicros`, and `keyFrame`. After the JSON header, exactly payloadBytes of H.264 Annex-B access-unit data follow.
 
 The host must emit video only after completed QuickTime negotiation and receipt of a valid FEED video sample. Opening a USB handle is not streaming. Timestamps must be monotonic. Keyframe flags must reflect actual IDR frames. SPS/PPS must be supplied at stream start and after format changes. No simulated frames are permitted.
 
