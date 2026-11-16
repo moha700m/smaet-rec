@@ -7,7 +7,7 @@ the pinned upstream source is the `third_party/iphone-usb-host` submodule.
 
 ## Runtime and device selection
 
-The application starts `resources/usb/iphone-usb-host.exe` with:
+The application starts `usb/iphone-usb-host.exe` with:
 
 ```text
 --smaet-ipc --pipe <pipe-name> --device-serial <Windows-USB-serial> --video bgra8
@@ -49,7 +49,7 @@ cmake --build build/usb-host --config Release --target iphone-usb-host
 ```
 
 CI builds the native engine and adapter, stages the runtime in
-`src/SmaetRec.App/resources/usb`, runs managed tests, and publishes the
+`src/SmaetRec.App/usb`, runs managed tests, and publishes the
 self-contained application. The release package also carries the GPL license,
 notices, and corresponding source archive.
 
