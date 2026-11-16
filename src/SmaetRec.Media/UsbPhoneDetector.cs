@@ -80,7 +80,8 @@ public static class UsbPhoneDetector
                 return null;
             foreach (var id in new string(buffer).Split('\\0', StringSplitOptions.RemoveEmptyEntries))
             {
-                if (!id.Contains("VID_05AC&PID_12", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!id.Contains("VID_05AC&PID_12", StringComparison.OrdinalIgnoreCase) ||
+                    id.Contains("&MI_", StringComparison.OrdinalIgnoreCase)) continue;
                 int slash = id.LastIndexOf('\\');
                 if (slash < 0 || slash == id.Length - 1) continue;
                 string serial = id[(slash + 1)..].Trim();
@@ -100,7 +101,7 @@ public static class UsbPhoneDetector
         try
         {
             using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
-                @"SYSTEM\CurrentControlSet\Enum\\" + instanceId, writable: false);
+                @"SYSTEM\CurrentControlSet\Enum\" + instanceId, writable: false);
             return key?.GetValue("Service") as string;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Security.SecurityException)
