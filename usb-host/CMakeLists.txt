@@ -16,6 +16,18 @@ if(NOT EXISTS "${IPHONEMIRROR_SOURCE}/CMakeLists.txt")
   message(FATAL_ERROR "iPhoneMirror submodule missing. Run: git submodule update --init --recursive")
 endif()
 
+# The upstream Core target references this generated RC via CMAKE_BINARY_DIR.
+# Because it is embedded as a subdirectory here, generate the expected root-
+# relative file explicitly as well as letting the upstream configure_file run.
+set(IPHONEMIRROR_VERSION "1.8.4")
+set(IPHONEMIRROR_BASE_VERSION "1.8.4")
+set(IPHONEMIRROR_FILE_VERSION "1,8,4,0")
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/src/Core")
+configure_file(
+  "${IPHONEMIRROR_SOURCE}/src/Core/resources/iPhoneMirror.Core.rc.in"
+  "${CMAKE_BINARY_DIR}/src/Core/iPhoneMirror.Core.rc"
+  @ONLY)
+
 add_subdirectory("${IPHONEMIRROR_SOURCE}" "${CMAKE_BINARY_DIR}/iphone-mirror")
 
 add_executable(iphone-usb-host adapter/main.cpp)
