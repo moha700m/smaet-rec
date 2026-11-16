@@ -74,3 +74,16 @@ notices, and corresponding source archive.
 
 No fake frames or AirPlay fallback are used by the USB path. A real-device
 acceptance test is required before claiming hardware compatibility.
+
+
+## Immediate USB mirroring fallback (no OBS)
+
+If 3uTools already detects the phone but SMAET REC's direct USB handshake does not start, use the working 3uTools capture as a temporary source instead of repeatedly changing drivers:
+
+1. Open 3uTools and connect/unlock the iPhone over USB.
+2. Open **Toolbox → Realtime Screen** in 3uTools. Its live screen viewer is documented by 3uTools: https://www.3u.com/tutorial/details/145/how-to-view-the-realtime-screen-of-your-idevice-using-3utools
+3. In SMAET REC choose **Computer screen → Window**, then select the 3uTools Realtime Screen window. SMAET REC records that window using its built-in Windows capture path; OBS is not required.
+
+Another wired USB option is the official 3uAirPlayer receiver: https://www.3u.com/airplayer. Its wired mode uses USB and does not require Wi-Fi; after opening its iPhone viewer window, select that window through SMAET REC's **Computer screen → Window** capture. Keep this as a fallback until direct USB is confirmed on the target PC.
+
+Do not uninstall 3uTools or replace its working Apple/USB device binding just to test SMAET REC. First run the read-only diagnostics above and save the displayed Apple USB/service/parent-driver states.
