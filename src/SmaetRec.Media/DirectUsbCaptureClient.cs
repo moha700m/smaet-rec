@@ -17,24 +17,24 @@ public sealed class DirectUsbCaptureClient : IAsyncDisposable
     private Task? _reader;
     private int _started;
 
-    public event Action<byte[], long, bool>? VideoAccessUnit;
+    public event Action<byte[], int, int, long>? VideoFrame;
     public event Action<string>? Status;
     public event Action<string>? Failed;
     public event Action? Disconnected;
 
     public DirectUsbCaptureClient(string resourceDirectory) => _resourceDirectory = Path.GetFullPath(resourceDirectory);
 
-    public async Task StartAsync(string udid, CancellationToken cancellationToken = default)
+    public async Task StartAsync(string usbSerial, CancellationToken cancellationToken = default)
     {
         if (Interlocked.Exchange(ref _started, 1) != 0) throw new InvalidOperationException("USB capture is already started.");
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Direct USB capture is Windows-only.");
-        if (string.IsNullOrWhiteSpace(udid) || udid.Length > 128 || udid.Any(char.IsControl)) throw new ArgumentException("A valid Apple UDID is required.", nameof(udid));
+        if (string.IsNullOrWhiteSpace(usbSerial) || usbSerial.Length > 128 || usbSerial.Any(char.IsControl)) throw new ArgumentException("A valid Apple UDID is required.", nameof(usbSerial));
         string exe = Path.Combine(_resourceDirectory, "usb", "iphone-usb-host.exe");
         if (!File.Exists(exe)) { Interlocked.Exchange(ref _started, 0); throw new FileNotFoundException("The separately licensed USB host is not installed. See docs/direct-usb-host.md.", exe); }
         _stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _pipe = new NamedPipeServerStream(_pipeName, PipeDirection.In, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 1024 * 1024, 1024 * 1024);
         var psi = new ProcessStartInfo(exe) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(exe)! };
-        foreach (var arg in new[] { "--smaet-ipc", "--pipe", _pipeName, "--device", udid, "--video", "h264-annexb" }) psi.ArgumentList.Add(arg);
+        foreach (var arg in new[] { "--smaet-ipc", "--pipe", _pipeName, "--device-serial", usbSerial, "--video", "bgra8" }) psi.ArgumentList.Add(arg);
         _host = Process.Start(psi) ?? throw new InvalidOperationException("Could not start USB host.");
         try { await _pipe.WaitForConnectionAsync(_stop.Token).ConfigureAwait(false); Status?.Invoke("USB host IPC connected; waiting for QuickTime video."); _reader = ReadLoopAsync(_pipe, _stop.Token); }
         catch { await StopAsync().ConfigureAwait(false); throw; }
@@ -63,9 +63,17 @@ public sealed class DirectUsbCaptureClient : IAsyncDisposable
                     case "video":
                     {
                         int payloadBytes = root.GetProperty("payloadBytes").GetInt32();
-                        int payloadOffset = 4 + headerLength;
-                        if (payloadBytes <= 0 || payloadOffset + payloadBytes != record.Length) throw new InvalidDataException("Inconsistent video IPC lengths.");
-                        VideoAccessUnit?.Invoke(record.AsSpan(payloadOffset, payloadBytes).ToArray(), root.GetProperty("timestampMicros").GetInt64(), root.GetProperty("keyFrame").GetBoolean());
+                        int width = root.GetProperty("width").GetInt32();
+                        int height = root.GetProperty("height").GetInt32();
+                        int stride = root.GetProperty("stride").GetInt32();
+                        string format = root.GetProperty("pixelFormat").GetString() ?? "";
+                        int payloadOffset = checked(4 + headerLength);
+                        if (format != "bgra8" || width is < 1 or > 16384 || height is < 1 or > 16384 ||
+                            stride != checked(width * 4) || payloadBytes != checked(stride * height) ||
+                            payloadOffset + payloadBytes != record.Length)
+                            throw new InvalidDataException("Invalid BGRA video IPC frame.");
+                        VideoFrame?.Invoke(record.AsSpan(payloadOffset, payloadBytes).ToArray(), width, height,
+                            root.GetProperty("timestamp100ns").GetInt64());
                         break;
                     }
                     case "error": throw new IOException(root.GetProperty("message").GetString() ?? "USB host error.");
