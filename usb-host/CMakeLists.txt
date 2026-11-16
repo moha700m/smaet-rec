@@ -25,6 +25,7 @@ target_compile_definitions(iphone-usb-host PRIVATE
   UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_options(iphone-usb-host PRIVATE /W4 /permissive- /utf-8 /EHsc)
 target_link_libraries(iphone-usb-host PRIVATE iPhoneMirror.Core)
+add_dependencies(iphone-usb-host iPhoneMirror.UsbConfigurationSwitch)
 
 set_target_properties(iphone-usb-host PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/package/usb"
@@ -36,6 +37,8 @@ set_target_properties(iphone-usb-host PROPERTIES
 add_custom_command(TARGET iphone-usb-host POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "$<TARGET_FILE:iPhoneMirror.Core>" "$<TARGET_FILE_DIR:iphone-usb-host>"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "$<TARGET_FILE:iPhoneMirror.UsbConfigurationSwitch>" "$<TARGET_FILE_DIR:iphone-usb-host>"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${IPHONEMIRROR_SOURCE}/third_party/libusb/bin/x64/libusb-1.0.dll"
     "$<TARGET_FILE_DIR:iphone-usb-host>"
