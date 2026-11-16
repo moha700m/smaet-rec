@@ -13,6 +13,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\SmaetRec.Core\SmaetRec.Core.csproj" />
+    <ProjectReference Include="..\..\src\SmaetRec.Media\SmaetRec.Media.csproj" />
     <ProjectReference Include="..\..\src\SmaetRec.AirPlay\SmaetRec.AirPlay.csproj" />
   </ItemGroup>
 </Project>
