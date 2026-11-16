@@ -149,7 +149,7 @@ public sealed class Studio : IDisposable
             H264Decoder? old;
             lock (_decoderLock) { old = _decoder; _decoder = null; _firstPacketTimestamp = null; _lastPacketPts = -1; }
             old?.Dispose();
-            if (_usbClient == null && !Engine.PhoneFrames.IsSimulated) Engine.PhoneFrames.Clear();
+            if (!UsbSessionActive && !Engine.PhoneFrames.IsSimulated) Engine.PhoneFrames.Clear();
         }
         PhoneStateChanged?.Invoke();
     }
