@@ -5,7 +5,7 @@ using static SmaetRec.Media.Native;
 namespace SmaetRec.Media;
 
 /// <summary>What Windows currently knows about an iPhone on a USB cable.</summary>
-public sealed record UsbPhoneStatus(bool PhonePluggedIn, bool AppleDriverInstalled, string? NetworkAddress, string? DeviceId = null)
+public sealed record UsbPhoneStatus(bool PhonePluggedIn, bool AppleSupportInstalled, string? NetworkAddress, string? DeviceId = null)
 {
     // Apple Mobile Device Support and the capture filter are separate components.
     // Presence of the phone is enough to attempt capture; the native host performs
@@ -37,7 +37,7 @@ public static class UsbPhoneDetector
             }
         }
         catch (NetworkInformationException) { }
-        bool driver = adapterSeen || AppleDriverInstalled();
+        bool driver = adapterSeen || AppleSupportInstalled();
         return new UsbPhoneStatus(plugged, driver, address, deviceId);
     }
 
@@ -62,7 +62,7 @@ public static class UsbPhoneDetector
         catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException) { }
         return null;
     }
-    private static bool AppleDriverInstalled()
+    private static bool AppleSupportInstalled()
     {
         try
         {
