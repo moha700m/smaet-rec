@@ -392,9 +392,6 @@ int Run(const std::wstring& pipeName, const std::wstring& requestedSerial) {
         }
     }
 
-    SendRecord("{\"type\":\"stopped\"}");
-    return exitCode;
-}
     im_shutdown();
     SendRecord("{\"type\":\"stopped\"}");
     return exitCode;
