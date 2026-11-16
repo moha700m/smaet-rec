@@ -23,7 +23,7 @@ public sealed class AirPlayReceiver : IDisposable
     private const string PairingId = "2e388006-13ba-4041-9a67-25dd4a43d536";
 
     private readonly object _lock = new();
-    private readonly byte[] _edPrivate = new byte[32];
+    private readonly byte[] _edPrivate;
     private readonly byte[] _edPublic = new byte[32];
     private CancellationTokenSource? _cts;
     private TcpListener? _control, _mirror, _events;
@@ -46,8 +46,37 @@ public sealed class AirPlayReceiver : IDisposable
 
     public AirPlayReceiver()
     {
-        RandomNumberGenerator.Fill(_edPrivate);
+        _edPrivate = LoadOrCreateIdentity();
         Ed25519.GeneratePublicKey(_edPrivate, 0, _edPublic, 0);
+    }
+
+    /// <summary>
+    /// A stable Ed25519 identity lets an iPhone keep its pairing across app restarts, the same way
+    /// an Apple TV keeps its key. It is not a secret with any value outside this LAN receiver.
+    /// </summary>
+    private static byte[] LoadOrCreateIdentity()
+    {
+        string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SmaetRec");
+        string path = Path.Combine(folder, "airplay-identity.key");
+        try
+        {
+            if (File.Exists(path))
+            {
+                var saved = File.ReadAllBytes(path);
+                if (saved.Length == 32) return saved;
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+
+        var key = new byte[32];
+        RandomNumberGenerator.Fill(key);
+        try
+        {
+            Directory.CreateDirectory(folder);
+            File.WriteAllBytes(path, key);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        return key;
     }
 
     public byte[] PublicKey => (byte[])_edPublic.Clone();
@@ -131,19 +160,42 @@ public sealed class AirPlayReceiver : IDisposable
 
     private static string FindDeviceId()
     {
+        string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SmaetRec");
+        string path = Path.Combine(folder, "airplay-device-id.txt");
+        try
+        {
+            if (File.Exists(path))
+            {
+                string saved = File.ReadAllText(path).Trim();
+                if (saved.Length == 17 && saved.Count(ch => ch == ':') == 5) return saved;
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+
+        string id = "";
         try
         {
             foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
             {
                 if (nic.OperationalStatus != OperationalStatus.Up || nic.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
                 var mac = nic.GetPhysicalAddress().GetAddressBytes();
-                if (mac.Length == 6 && mac.Any(b => b != 0)) return string.Join(":", mac.Select(b => b.ToString("X2")));
+                if (mac.Length == 6 && mac.Any(b => b != 0)) { id = string.Join(":", mac.Select(b => b.ToString("X2"))); break; }
             }
         }
         catch (NetworkInformationException) { }
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(Environment.MachineName));
-        hash[0] = (byte)((hash[0] | 0x02) & 0xFE);
-        return string.Join(":", hash.Take(6).Select(b => b.ToString("X2")));
+        if (id.Length == 0)
+        {
+            var hash = SHA256.HashData(Encoding.UTF8.GetBytes(Environment.MachineName));
+            hash[0] = (byte)((hash[0] | 0x02) & 0xFE);
+            id = string.Join(":", hash.Take(6).Select(b => b.ToString("X2")));
+        }
+        try
+        {
+            Directory.CreateDirectory(folder);
+            File.WriteAllText(path, id);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        return id;
     }
 
     private void StartAdvertising()

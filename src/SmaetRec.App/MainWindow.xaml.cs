@@ -497,6 +497,10 @@ public partial class MainWindow : Window
 
     private void Phone_Click(object sender, RoutedEventArgs e)
     {
+        // Opening the connect flow should always reveal the iPhone frame, even if a previous
+        // session left the layer hidden.
+        lock (Scene.Sync) Scene.Phone.Visible = true;
+        Scene.NotifyChanged();
         if (_connectWindow is { IsLoaded: true }) { _connectWindow.Activate(); return; }
         _connectWindow = new ConnectPhoneWindow(_studio) { Owner = this };
         _connectWindow.Show();
