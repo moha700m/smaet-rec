@@ -88,6 +88,39 @@ public partial class ConnectPhoneWindow : Window
         finally { _usbConnecting = false; ConnectUsb.IsEnabled = _usbReady && _usbDeviceId != null && !_studio.UsbSessionActive; }
     }
 
+    private void ThreeUToolsScreen_Click(object sender, RoutedEventArgs e)
+    {
+        MessageBox.Show(this,
+            "First open 3uTools, choose Toolbox > Realtime Screen, and leave the iPhone preview window visible. Then select that window in the next list.",
+            "3uTools Realtime Screen", MessageBoxButton.OK, MessageBoxImage.Information);
+
+        var picker = new ScreenPickerWindow(
+            _studio.Engine.ScreenActive,
+            windowsOnly: true,
+            dialogTitle: "Select the 3uTools iPhone screen",
+            instructions: "Choose the live iPhone preview window created by 3uTools. Keep that window restored and visible while capturing.");
+        if (picker.ShowDialog() != true) return;
+        if (picker.Selected is not { Kind: CaptureKind.Window } target)
+        {
+            MessageBox.Show(this, "Select the 3uTools Realtime Screen window, not a desktop monitor.",
+                "3uTools Realtime Screen", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        if (!target.StillExists)
+        {
+            MessageBox.Show(this, "That window has closed. Reopen 3uTools Realtime Screen and try again.",
+                "3uTools Realtime Screen", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        lock (_studio.Scene.Sync) _studio.Scene.Screen.Visible = true;
+        _studio.Scene.NotifyChanged();
+        _studio.Engine.ShowScreen(target);
+        MessageBox.Show(this,
+            "The selected 3uTools window is now the live desktop source in SMAET REC. You can record it with the normal Record button.",
+            "3uTools Realtime Screen", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
     private void Diagnose_Click(object sender, RoutedEventArgs e)
     {
         if (_diagnostics is { IsLoaded: true }) { _diagnostics.Activate(); return; }
