@@ -58,10 +58,7 @@ public partial class ConnectPhoneWindow : Window
             var usb = await Task.Run(UsbPhoneDetector.Check);
             _usbDeviceId = usb.DeviceId;
             _usbReady = usb.PhonePluggedIn;
-            ConnectUsb.IsEnabled = usb.PhonePluggedIn && _usbDeviceId != null && !_usbConnecting && !_studio.UsbSessionActive;
-            ConnectUsb.Content = _studio.UsbConnected ? "USB streaming"
-                : _usbConnecting ? _studio.UsbStatus
-                : _studio.UsbSessionActive ? "Waiting for video..." : "Connect USB";
+            UpdateUsbButton();
             Set(UsbPhone, UsbPhoneDot, usb.PhonePluggedIn, Loc.T(usb.PhonePluggedIn ? "UsbPhoneFound" : "UsbPhoneMissing"));
             Set(UsbDriver, UsbDriverDot, usb.AppleUsbDriverInstalled, Loc.T(usb.AppleUsbDriverInstalled ? "UsbDriverFound" : "UsbDriverMissing"));
             Set(UsbService, UsbServiceDot, usb.AppleMobileDeviceServiceRunning,
@@ -94,13 +91,43 @@ public partial class ConnectPhoneWindow : Window
 
     private void Reconnect_Click(object sender, RoutedEventArgs e) => _studio.StartReceiver();
 
+    /// <summary>One button for the whole USB session: connect, stop while live, or try again after a failure.</summary>
+    private void UpdateUsbButton()
+    {
+        var phase = _studio.UsbState;
+        bool live = phase is Studio.UsbPhase.Live or Studio.UsbPhase.Stalled;
+        bool busy = _usbConnecting || phase is Studio.UsbPhase.Starting or Studio.UsbPhase.Reconnecting;
+        ConnectUsb.Content = live ? Loc.T("UsbStop", _studio.UsbFps.ToString("0"))
+            : busy ? Loc.T("UsbConnecting")
+            : phase == Studio.UsbPhase.Failed ? Loc.T("UsbRetry") : Loc.T("UsbConnect");
+        ConnectUsb.IsEnabled = live || (!busy && _usbReady && _usbDeviceId != null);
+        ConnectUsb.ToolTip = busy || phase == Studio.UsbPhase.Failed ? _studio.UsbStatus : null;
+        UsbProgress.Text = busy || phase == Studio.UsbPhase.Failed ? _studio.UsbStatus : "";
+        UsbProgress.Visibility = UsbProgress.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     private async void ConnectUsb_Click(object sender, RoutedEventArgs e)
     {
-        if (string.IsNullOrWhiteSpace(_usbDeviceId)) { MessageBox.Show(this, "Connect and unlock your iPhone, then try again.", "Direct USB", MessageBoxButton.OK, MessageBoxImage.Information); return; }
-        _usbConnecting = true; ConnectUsb.IsEnabled = false; ConnectUsb.Content = "Connecting...";
-        try { await _studio.ConnectUsbAsync(_usbDeviceId); ConnectUsb.Content = "Waiting for video..."; }
-        catch (Exception ex) { ConnectUsb.Content = "Connect USB"; MessageBox.Show(this, ex.Message, "Direct USB capture", MessageBoxButton.OK, MessageBoxImage.Warning); }
-        finally { _usbConnecting = false; ConnectUsb.IsEnabled = _usbReady && _usbDeviceId != null && !_studio.UsbSessionActive; }
+        if (_studio.UsbState is Studio.UsbPhase.Live or Studio.UsbPhase.Stalled)
+        {
+            ConnectUsb.IsEnabled = false;
+            await _studio.StopUsbAsync();
+            UpdateUsbButton();
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_usbDeviceId))
+        {
+            MessageBox.Show(this, Loc.T("UsbPlugFirst"), Loc.T("UsbFailedTitle"), MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        _usbConnecting = true;
+        UpdateUsbButton();
+        try { await _studio.ConnectUsbAsync(_usbDeviceId); }
+        catch (Exception ex) when (ex is IOException or TimeoutException or InvalidOperationException or ArgumentException or OperationCanceledException or PlatformNotSupportedException)
+        {
+            MessageBox.Show(this, Loc.T("UsbFailedBody", ex.Message), Loc.T("UsbFailedTitle"), MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally { _usbConnecting = false; UpdateUsbButton(); }
     }
 
     private void Diagnose_Click(object sender, RoutedEventArgs e)
@@ -241,7 +268,7 @@ public partial class ConnectPhoneWindow : Window
         string driverTool = Path.Combine(AppContext.BaseDirectory, "usb", "iPhoneMirror.Driver.exe");
         if (!File.Exists(driverTool))
         {
-            MessageBox.Show(this, "The USB driver manager is not included in this build. Rebuild using the repository Windows workflow.", "USB driver setup", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, Loc.T("UsbDriverToolMissing"), Loc.T("UsbFailedTitle"), MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         try { Process.Start(new ProcessStartInfo(driverTool) { UseShellExecute = true }); }

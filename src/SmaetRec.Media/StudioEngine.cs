@@ -9,6 +9,16 @@ using Vortice.Mathematics;
 
 namespace SmaetRec.Media;
 
+/// <summary>How the live picture of a source is doing, measured once a second.</summary>
+/// <param name="Fps">New pictures that actually arrived in the last second.</param>
+/// <param name="QuietSeconds">Seconds since the picture last changed (a still screen is quiet too).</param>
+/// <param name="Black">True when the sampled spots are all black; null when unknown.</param>
+/// <param name="Minimized">The captured window is minimised, so Windows delivers no pictures.</param>
+public sealed record SourceHealth(bool Active, double Fps, double QuietSeconds, bool? Black, bool Minimized, int Width, int Height, string Method)
+{
+    public static readonly SourceHealth None = new(false, 0, 0, null, false, 0, 0, "");
+}
+
 public sealed record RecordingStatus(string Path, bool Microphone, bool SystemAudio, string? MicrophoneError, string? SystemAudioError);
 public sealed record RecordingResult(string Path, string? Error, TimeSpan Duration, long Frames, long DroppedFrames, bool HadAudioTrack);
 
@@ -73,6 +83,14 @@ public sealed class StudioEngine : IDisposable
 
     /// <summary>Raised when the screen picture starts, stops or fails. Argument: error text or null.</summary>
     public event Action<bool, string?>? ScreenChanged;
+    /// <summary>Raised when the window or screen being shown disappeared on its own (closed, unplugged).</summary>
+    public event Action<CaptureTarget>? ScreenSourceLost;
+    /// <summary>Raised about once a second while a screen/window source is shown.</summary>
+    public event Action<SourceHealth>? ScreenHealthChanged;
+    public SourceHealth ScreenHealth { get; private set; } = SourceHealth.None;
+    public SourceHealth PhoneHealth { get; private set; } = SourceHealth.None;
+    private long _screenFrames, _screenFramesAtCheck, _screenLastFrameTick;
+    private long _phoneFrames, _phoneFramesAtCheck, _phoneLastFrameTick;
     public event Action<string>? RecordingFailed;
     public event Action<string>? Error;
 
@@ -456,6 +474,7 @@ public sealed class StudioEngine : IDisposable
             if (_screenSource.Update(gd))
             {
                 dirty = true;
+                _screenFrames++; _screenLastFrameTick = Environment.TickCount64;
                 if (_screenSource.Width != _screenW || _screenSource.Height != _screenH)
                 {
                     _screenW = _screenSource.Width; _screenH = _screenSource.Height;
@@ -465,12 +484,26 @@ public sealed class StudioEngine : IDisposable
             if (Environment.TickCount64 - _lastAliveCheck > 1000)
             {
                 _lastAliveCheck = Environment.TickCount64;
-                if (!_screenSource.IsAlive) { DropScreenSource(); dirty = true; ScreenChanged?.Invoke(false, null); }
+                if (!_screenSource.IsAlive)
+                {
+                    CaptureTarget? lost;
+                    lock (_stateLock) lost = _screenTarget;
+                    DropScreenSource(); dirty = true;
+                    ScreenChanged?.Invoke(false, null);
+                    if (lost != null) ScreenSourceLost?.Invoke(lost);
+                }
+                MeasureHealth(gd);
             }
+        }
+        if (_screenSource == null && Environment.TickCount64 - _lastAliveCheck > 1000)
+        {
+            _lastAliveCheck = Environment.TickCount64;
+            MeasureHealth(gd);
         }
         if (PhoneFrames.Update(gd))
         {
             dirty = true;
+            _phoneFrames++; _phoneLastFrameTick = Environment.TickCount64;
             if (PhoneFrames.Width > 0)
             {
                 bool landscape = PhoneFrames.Width > PhoneFrames.Height;
@@ -516,6 +549,48 @@ public sealed class StudioEngine : IDisposable
             _compositor!.DrawPreview(_backBuffer, _previewWidth, _previewHeight, _lastState, new Color4(0.043f, 0.047f, 0.063f, 1f));
             _swapChain.Present(0, PresentFlags.None).CheckError();
         }
+    }
+
+    private long _lastHealthTick;
+
+    /// <summary>Runs about once a second on the render thread.</summary>
+    private void MeasureHealth(GraphicsDevice gd)
+    {
+        long now = Environment.TickCount64;
+        double seconds = _lastHealthTick == 0 ? 1 : Math.Max(0.2, (now - _lastHealthTick) / 1000.0);
+        _lastHealthTick = now;
+
+        var previousScreen = ScreenHealth;
+        if (_screenSource != null)
+        {
+            CaptureTarget? target;
+            lock (_stateLock) target = _screenTarget;
+            bool minimized = target is { Kind: CaptureKind.Window } && Native.IsIconic(target.Handle);
+            double fps = (_screenFrames - _screenFramesAtCheck) / seconds;
+            _screenFramesAtCheck = _screenFrames;
+            bool? black = null;
+            try { if (_screenSource.Width > 0) black = _screenSource.ProbeBlack(gd); }
+            catch (SharpGen.Runtime.SharpGenException e) { Log.Write("Black-frame probe: " + e.Message); }
+            string method = _screenSource switch { WgcScreenSource => "WGC", GdiScreenSource => "GDI", _ => _screenSource.IsSimulated ? "SIM" : "" };
+            ScreenHealth = new SourceHealth(true, Math.Round(fps, 1), _screenLastFrameTick == 0 ? 0 : (now - _screenLastFrameTick) / 1000.0,
+                black, minimized, _screenSource.Width, _screenSource.Height, method);
+        }
+        else
+        {
+            ScreenHealth = SourceHealth.None;
+            _screenFramesAtCheck = _screenFrames; _screenLastFrameTick = 0;
+        }
+
+        if (PhoneFrames.Width > 0)
+        {
+            double fps = (_phoneFrames - _phoneFramesAtCheck) / seconds;
+            PhoneHealth = new SourceHealth(true, Math.Round(fps, 1), _phoneLastFrameTick == 0 ? 0 : (now - _phoneLastFrameTick) / 1000.0,
+                PhoneFrames.ProbeBlack(gd), false, PhoneFrames.Width, PhoneFrames.Height, "");
+        }
+        else PhoneHealth = SourceHealth.None;
+        _phoneFramesAtCheck = _phoneFrames;
+
+        if (ScreenHealth.Active || previousScreen.Active) ScreenHealthChanged?.Invoke(ScreenHealth);
     }
 
     private const double RippleSeconds = 0.55;

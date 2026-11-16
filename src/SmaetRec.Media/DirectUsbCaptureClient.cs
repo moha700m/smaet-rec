@@ -15,6 +15,7 @@ public sealed class DirectUsbCaptureClient : IAsyncDisposable
     private NamedPipeServerStream? _pipe;
     private CancellationTokenSource? _stop;
     private Task? _reader;
+    private KillOnCloseJob? _job;
     private int _started;
     private int _pipeConnected;
     private int _streaming;
@@ -46,6 +47,8 @@ public sealed class DirectUsbCaptureClient : IAsyncDisposable
             var psi = new ProcessStartInfo(exe) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(exe)! };
             foreach (var arg in new[] { "--smaet-ipc", "--pipe", _pipeName, "--device-serial", usbSerial, "--video", "bgra8" }) psi.ArgumentList.Add(arg);
             _host = Process.Start(psi) ?? throw new InvalidOperationException("Could not start USB host.");
+            // If this app dies for any reason, Windows ends the host with it: no orphaned capture process.
+            _job = KillOnCloseJob.TryAttach(_host);
 
             var connection = _pipe.WaitForConnectionAsync(_stop.Token);
             var exited = _host.WaitForExitAsync();
@@ -88,54 +91,34 @@ public sealed class DirectUsbCaptureClient : IAsyncDisposable
         }
     }
 
+    /// <summary>Supplies the buffer a picture is read into (so frames are not copied twice). Defaults to a new array.</summary>
+    public Func<int, byte[]>? RentBuffer { get; set; }
+
+    /// <summary>Decoded pictures received from the host in this session.</summary>
+    public long FramesReceived => Interlocked.Read(ref _frames);
+    /// <summary>Milliseconds since the last picture arrived, or -1 before the first one.</summary>
+    public long MillisecondsSinceLastFrame
+    {
+        get { long t = Interlocked.Read(ref _lastFrameTick); return t == 0 ? -1 : Environment.TickCount64 - t; }
+    }
+    private long _frames, _lastFrameTick;
+
     private async Task ReadLoopAsync(Stream stream, CancellationToken token)
     {
-        byte[] prefix = new byte[4];
         try
         {
-            while (!token.IsCancellationRequested)
+            await ReadRecordsAsync(stream, RentBuffer, message =>
             {
-                await ReadExactlyAsync(stream, prefix, token).ConfigureAwait(false);
-                int length = BinaryPrimitives.ReadInt32LittleEndian(prefix);
-                if (length < 2 || length > MaxRecordBytes) throw new InvalidDataException($"Invalid USB IPC record length: {length}.");
-                byte[] record = GC.AllocateUninitializedArray<byte>(length);
-                await ReadExactlyAsync(stream, record, token).ConfigureAwait(false);
-                if (record.Length < 4) throw new InvalidDataException("Truncated USB IPC record.");
-                int headerLength = BinaryPrimitives.ReadInt32LittleEndian(record);
-                if (headerLength <= 1 || headerLength > record.Length - 4) throw new InvalidDataException("Invalid USB IPC header length.");
-                using var doc = JsonDocument.Parse(record.AsMemory(4, headerLength));
-                var root = doc.RootElement;
-                switch (root.GetProperty("type").GetString())
-                {
-                    case "status":
-                    {
-                        _lastStatus = root.GetProperty("message").GetString() ?? "Native USB host is working.";
-                        Status?.Invoke(_lastStatus);
-                        break;
-                    }
-                    case "video":
-                    {
-                        int payloadBytes = root.GetProperty("payloadBytes").GetInt32();
-                        int width = root.GetProperty("width").GetInt32();
-                        int height = root.GetProperty("height").GetInt32();
-                        int stride = root.GetProperty("stride").GetInt32();
-                        string format = root.GetProperty("pixelFormat").GetString() ?? "";
-                        int payloadOffset = checked(4 + headerLength);
-                        if (format != "bgra8" || width is < 1 or > 16384 || height is < 1 or > 16384 ||
-                            stride != checked(width * 4) || payloadBytes != checked(stride * height) ||
-                            payloadOffset + payloadBytes != record.Length)
-                            throw new InvalidDataException("Invalid BGRA video IPC frame.");
-                        Volatile.Write(ref _streaming, 1);
-                        _firstFrame.TrySetResult(true);
-                        VideoFrame?.Invoke(record.AsSpan(payloadOffset, payloadBytes).ToArray(), width, height,
-                            root.GetProperty("timestamp100ns").GetInt64());
-                        break;
-                    }
-                    case "error": throw new IOException(root.GetProperty("message").GetString() ?? "USB host error.");
-                    case "stopped": return;
-                    default: throw new InvalidDataException("Unknown USB IPC record type.");
-                }
-            }
+                _lastStatus = message;
+                Status?.Invoke(message);
+            }, (pixels, width, height, timestamp) =>
+            {
+                Interlocked.Increment(ref _frames);
+                Interlocked.Exchange(ref _lastFrameTick, Environment.TickCount64);
+                Volatile.Write(ref _streaming, 1);
+                _firstFrame.TrySetResult(true);
+                VideoFrame?.Invoke(pixels, width, height, timestamp);
+            }, token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (EndOfStreamException e) when (!token.IsCancellationRequested) { Failed?.Invoke(e.Message); }
@@ -153,6 +136,68 @@ public sealed class DirectUsbCaptureClient : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Reads host records until a "stopped" record. Pictures are read straight into a buffer from
+    /// <paramref name="rent"/> (at least width*height*4 bytes) and handed to <paramref name="onVideo"/>, which owns it afterwards.
+    /// Throws <see cref="IOException"/> for a host-reported error and <see cref="InvalidDataException"/> for a malformed stream.
+    /// </summary>
+    public static async Task ReadRecordsAsync(Stream stream, Func<int, byte[]>? rent, Action<string> onStatus,
+        Action<byte[], int, int, long> onVideo, CancellationToken token)
+    {
+        byte[] prefix = new byte[8];
+        byte[] header = new byte[1024];
+        while (!token.IsCancellationRequested)
+        {
+            await ReadExactlyAsync(stream, prefix, token).ConfigureAwait(false);
+            int length = BinaryPrimitives.ReadInt32LittleEndian(prefix);
+            int headerLength = BinaryPrimitives.ReadInt32LittleEndian(prefix.AsSpan(4));
+            if (length < 6 || length > MaxRecordBytes) throw new InvalidDataException($"Invalid USB IPC record length: {length}.");
+            if (headerLength <= 1 || headerLength > length - 4 || headerLength > 64 * 1024) throw new InvalidDataException("Invalid USB IPC header length.");
+            if (header.Length < headerLength) header = new byte[headerLength];
+            await ReadExactlyAsync(stream, header.AsMemory(0, headerLength), token).ConfigureAwait(false);
+            int payloadLength = length - 4 - headerLength;
+
+            string type; string? message = null;
+            int width = 0, height = 0; long timestamp = 0;
+            using (var doc = JsonDocument.Parse(header.AsMemory(0, headerLength)))
+            {
+                var root = doc.RootElement;
+                type = root.GetProperty("type").GetString() ?? "";
+                if (type is "status" or "error") message = root.GetProperty("message").GetString();
+                else if (type == "video")
+                {
+                    int payloadBytes = root.GetProperty("payloadBytes").GetInt32();
+                    width = root.GetProperty("width").GetInt32();
+                    height = root.GetProperty("height").GetInt32();
+                    int stride = root.GetProperty("stride").GetInt32();
+                    string format = root.GetProperty("pixelFormat").GetString() ?? "";
+                    if (format != "bgra8" || width is < 1 or > 16384 || height is < 1 or > 16384 ||
+                        stride != checked(width * 4) || payloadBytes != checked(stride * height) || payloadBytes != payloadLength)
+                        throw new InvalidDataException("Invalid BGRA video IPC frame.");
+                    timestamp = root.GetProperty("timestamp100ns").GetInt64();
+                }
+            }
+            switch (type)
+            {
+                case "video":
+                {
+                    byte[] pixels = rent?.Invoke(payloadLength) ?? GC.AllocateUninitializedArray<byte>(payloadLength);
+                    if (pixels.Length < payloadLength) throw new InvalidOperationException("The frame buffer is too small.");
+                    await ReadExactlyAsync(stream, pixels.AsMemory(0, payloadLength), token).ConfigureAwait(false);
+                    onVideo(pixels, width, height, timestamp);
+                    break;
+                }
+                case "status":
+                    if (payloadLength != 0) throw new InvalidDataException("Unexpected payload on a status record.");
+                    onStatus(message ?? "Native USB host is working.");
+                    break;
+                case "error": throw new IOException(message ?? "USB host error.");
+                case "stopped": return;
+                default: throw new InvalidDataException("Unknown USB IPC record type.");
+            }
+        }
+    }
+
     private static async Task ReadExactlyAsync(Stream stream, Memory<byte> buffer, CancellationToken token)
     {
         int offset = 0;
@@ -162,17 +207,83 @@ public sealed class DirectUsbCaptureClient : IAsyncDisposable
     public async Task StopAsync()
     {
         _stop?.Cancel();
-        if (_reader != null) { try { await _reader.ConfigureAwait(false); } catch (OperationCanceledException) { } catch (Exception e) when (e is IOException or InvalidDataException or JsonException) { } }
-        if (_host != null)
+        // Close our end first: the host's next write then fails and it shuts its capture session down
+        // cleanly (restoring the iPhone's USB configuration). Only if it does not, end it.
+        try { _pipe?.Dispose(); } catch (IOException) { }
+        _pipe = null;
+        if (_reader != null) { try { await _reader.ConfigureAwait(false); } catch (OperationCanceledException) { } catch (Exception e) when (e is IOException or InvalidDataException or JsonException or ObjectDisposedException) { } }
+        _reader = null;
+        var host = _host; _host = null;
+        if (host != null)
         {
-            try { if (!_host.HasExited && !_host.WaitForExit(3000)) _host.Kill(entireProcessTree: true); }
+            try
+            {
+                if (!host.HasExited)
+                {
+                    using var grace = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+                    try { await host.WaitForExitAsync(grace.Token).ConfigureAwait(false); }
+                    catch (OperationCanceledException) { host.Kill(entireProcessTree: true); }
+                }
+            }
             catch (InvalidOperationException) { }
             catch (System.ComponentModel.Win32Exception) { }
+            host.Dispose();
         }
-        _host?.Dispose(); _host = null; _pipe?.Dispose(); _pipe = null; _stop?.Dispose(); _stop = null;
+        _job?.Dispose(); _job = null;
+        _stop?.Dispose(); _stop = null;
         Volatile.Write(ref _streaming, 0);
         Volatile.Write(ref _pipeConnected, 0);
         Interlocked.Exchange(ref _started, 0);
     }
     public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
+}
+
+/// <summary>A Windows job object that ends the processes in it when this app exits, however it exits.</summary>
+internal sealed class KillOnCloseJob : IDisposable
+{
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern IntPtr CreateJobObjectW(IntPtr attributes, string? name);
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetInformationJobObject(IntPtr job, int infoClass, IntPtr info, uint length);
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    private IntPtr _handle;
+    private KillOnCloseJob(IntPtr handle) => _handle = handle;
+
+    public static KillOnCloseJob? TryAttach(Process process)
+    {
+        try
+        {
+            IntPtr job = CreateJobObjectW(IntPtr.Zero, null);
+            if (job == IntPtr.Zero) return null;
+            // JOBOBJECT_EXTENDED_LIMIT_INFORMATION (x64: 144 bytes); LimitFlags at offset 16; KILL_ON_JOB_CLOSE = 0x2000.
+            const int size = 144;
+            IntPtr info = System.Runtime.InteropServices.Marshal.AllocHGlobal(size);
+            try
+            {
+                for (int i = 0; i < size; i++) System.Runtime.InteropServices.Marshal.WriteByte(info, i, 0);
+                System.Runtime.InteropServices.Marshal.WriteInt32(info, 16, 0x2000);
+                if (!SetInformationJobObject(job, 9, info, size) || !AssignProcessToJobObject(job, process.Handle))
+                {
+                    CloseHandle(job);
+                    return null;
+                }
+            }
+            finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(info); }
+            return new KillOnCloseJob(job);
+        }
+        catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception or EntryPointNotFoundException or DllNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    public void Dispose()
+    {
+        // Closing the handle would kill the host; by the time this runs the host has already exited or been ended.
+        if (_handle != IntPtr.Zero) { CloseHandle(_handle); _handle = IntPtr.Zero; }
+    }
 }

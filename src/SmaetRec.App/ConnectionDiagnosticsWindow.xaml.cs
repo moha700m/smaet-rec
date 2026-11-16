@@ -78,6 +78,19 @@ public partial class ConnectionDiagnosticsWindow : Window
                     _studio.PhoneFramesDecoded, receiver.MirrorInvalid)
                     + (receiver.MirrorKeyVariant is { } key ? $" · {key}" : "");
                 VideoDot.Fill = Res(_studio.PhoneFramesDecoded > 0 ? "GreenBrush" : "AmberBrush");
+                // Say why nothing is shown, in words, so a screenshot of this window is enough to diagnose it.
+                if (_studio.PhoneDecoderError is { } decoderError)
+                {
+                    VideoText.Text += Environment.NewLine + Loc.T("DiagVideoDecoderError", decoderError);
+                    VideoDot.Fill = Res("RedBrush");
+                }
+                else if (_studio.PhoneFramesDecoded == 0 && receiver.MirrorPictures > 30)
+                {
+                    VideoText.Text += Environment.NewLine + (receiver.MirrorHasParameterSets
+                        ? Loc.T("DiagVideoWaitingStart", _studio.PhonePacketsWaitingForStart)
+                        : Loc.T("DiagVideoNoSps"));
+                    VideoDot.Fill = Res("RedBrush");
+                }
                 if (_studio.PhonePacketsDropped > 0)
                 {
                     VideoText.Text += Environment.NewLine + Loc.T("DiagTooSlow", _studio.PhonePacketsDropped);

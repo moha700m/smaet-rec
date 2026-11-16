@@ -78,11 +78,40 @@ public sealed class Studio : IDisposable
         catch (Exception e) when (e is not OutOfMemoryException) { Log.Error("Receiver start", e); }
     });
 
+    public enum UsbPhase { Idle, Starting, Live, Stalled, Reconnecting, Failed }
+
+    private readonly SemaphoreSlim _usbGate = new(1, 1);
+    private string? _usbSerial;
+    private int _usbReconnects;
+    private volatile UsbPhase _usbPhase = UsbPhase.Idle;
+    private System.Threading.Timer? _usbWatch;
+    private long _usbFramesAtLastTick, _usbFpsTimes10;
+
+    public UsbPhase UsbState => _usbPhase;
+    /// <summary>Pictures per second actually arriving over USB, measured over the last second.</summary>
+    public double UsbFps => Interlocked.Read(ref _usbFpsTimes10) / 10.0;
+    public long UsbFrames => _usbClient?.FramesReceived ?? 0;
+
+    /// <summary>Starts direct USB capture. Returns when the first real picture has arrived; throws with the failing stage otherwise.</summary>
     public async Task ConnectUsbAsync(string usbSerial, CancellationToken cancellationToken = default)
     {
-        await StopUsbAsync().ConfigureAwait(false);
+        await _usbGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            _usbSerial = usbSerial;
+            _usbReconnects = 0;
+            await StartUsbCoreAsync(usbSerial, cancellationToken).ConfigureAwait(false);
+        }
+        finally { _usbGate.Release(); }
+    }
+
+    private async Task StartUsbCoreAsync(string usbSerial, CancellationToken cancellationToken)
+    {
+        await StopUsbCoreAsync(clearPicture: false).ConfigureAwait(false);
+        _usbPhase = UsbPhase.Starting;
         _usbStatus = "Starting the native USB capture host.";
-        var client = new DirectUsbCaptureClient(AppContext.BaseDirectory);
+        PhoneStateChanged?.Invoke();
+        var client = new DirectUsbCaptureClient(AppContext.BaseDirectory) { RentBuffer = bytes => Engine.PhoneFrames.Rent(bytes) };
         client.VideoFrame += OnDirectUsbFrame;
         client.Status += message =>
         {
@@ -94,36 +123,101 @@ public sealed class Studio : IDisposable
         {
             _usbStatus = "USB error: " + message;
             Log.Write(_usbStatus);
-            PhoneStateChanged?.Invoke();
         };
-        client.Disconnected += () =>
-        {
-            _usbStreaming = false;
-            if (!_usbStatus.StartsWith("USB error:", StringComparison.Ordinal))
-                _usbStatus = "USB capture disconnected.";
-            PhoneStateChanged?.Invoke();
-        };
+        client.Disconnected += () => OnUsbDisconnected(client);
         _usbClient = client;
         try { await client.StartAsync(usbSerial, cancellationToken).ConfigureAwait(false); }
         catch (Exception ex)
         {
             _usbStatus = "USB startup failed: " + ex.Message;
-            _usbClient = null;
+            _usbPhase = UsbPhase.Failed;
+            if (ReferenceEquals(_usbClient, client)) _usbClient = null;
             await client.DisposeAsync().ConfigureAwait(false);
+            Log.Write(_usbStatus);
+            PhoneStateChanged?.Invoke();
             throw;
         }
+        _usbWatch ??= new System.Threading.Timer(_ => WatchUsb());
+        _usbWatch.Change(1000, 1000);
         PhoneStateChanged?.Invoke();
+    }
+
+    /// <summary>The host ended or the pipe broke. If video had been flowing, try to bring it back a few times.</summary>
+    private void OnUsbDisconnected(DirectUsbCaptureClient client)
+    {
+        if (!ReferenceEquals(_usbClient, client)) return;   // a deliberate stop or a newer session
+        bool wasLive = _usbStreaming;
+        _usbStreaming = false;
+        if (Receiver.State != ReceiverState.Connected && !Engine.PhoneFrames.IsSimulated) Engine.PhoneFrames.Clear();
+        if (!wasLive || _usbSerial == null || _usbReconnects >= 3)
+        {
+            if (wasLive) { _usbPhase = UsbPhase.Failed; if (!_usbStatus.StartsWith("USB error:", StringComparison.Ordinal)) _usbStatus = "USB capture disconnected."; }
+            PhoneStateChanged?.Invoke();
+            return;
+        }
+        _usbPhase = UsbPhase.Reconnecting;
+        PhoneStateChanged?.Invoke();
+        string serial = _usbSerial;
+        _ = Task.Run(async () =>
+        {
+            await _usbGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                if (!ReferenceEquals(_usbClient, client) || _usbPhase != UsbPhase.Reconnecting) return;
+                _usbReconnects++;
+                Log.Write($"USB video stopped; reconnecting (attempt {_usbReconnects} of 3).");
+                await Task.Delay(2500).ConfigureAwait(false);   // let Windows re-enumerate the phone after a cable bump
+                if (_usbPhase != UsbPhase.Reconnecting) return;
+                await StartUsbCoreAsync(serial, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception e) when (e is IOException or TimeoutException or InvalidOperationException or ArgumentException or OperationCanceledException)
+            {
+                Log.Write("USB reconnect failed: " + e.Message);
+            }
+            finally { _usbGate.Release(); }
+        });
+    }
+
+    /// <summary>Once a second: measure the real frame rate and notice video that stopped without the host saying so.</summary>
+    private void WatchUsb()
+    {
+        var client = _usbClient;
+        if (client == null) { Interlocked.Exchange(ref _usbFpsTimes10, 0); return; }
+        long frames = client.FramesReceived;
+        long previous = Interlocked.Exchange(ref _usbFramesAtLastTick, frames);
+        Interlocked.Exchange(ref _usbFpsTimes10, Math.Max(0, frames - previous) * 10);
+        if (!_usbStreaming) return;
+        long quiet = client.MillisecondsSinceLastFrame;
+        var before = _usbPhase;
+        // A still screen sends few pictures, so "stalled" needs a long silence; it is a warning, not a disconnect.
+        _usbPhase = quiet > 8000 ? UsbPhase.Stalled : UsbPhase.Live;
+        if (_usbPhase == UsbPhase.Live) _usbReconnects = 0;
+        if (before != _usbPhase || _usbPhase == UsbPhase.Live) PhoneStateChanged?.Invoke();
     }
 
     public async Task StopUsbAsync()
     {
+        await _usbGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            _usbSerial = null;
+            await StopUsbCoreAsync(clearPicture: true).ConfigureAwait(false);
+            _usbPhase = UsbPhase.Idle;
+            _usbStatus = "USB capture stopped.";
+        }
+        finally { _usbGate.Release(); }
+        PhoneStateChanged?.Invoke();
+    }
+
+    private async Task StopUsbCoreAsync(bool clearPicture)
+    {
         var client = _usbClient;
         _usbClient = null;
         _usbStreaming = false;
-        _usbStatus = "USB capture stopped.";
+        _usbWatch?.Change(Timeout.Infinite, Timeout.Infinite);
+        Interlocked.Exchange(ref _usbFpsTimes10, 0);
         if (client != null) await client.DisposeAsync().ConfigureAwait(false);
-        if (Receiver.State != ReceiverState.Connected && !Engine.PhoneFrames.IsSimulated) Engine.PhoneFrames.Clear();
-        PhoneStateChanged?.Invoke();
+        if (clearPicture && Receiver.State != ReceiverState.Connected && !Engine.PhoneFrames.IsSimulated) Engine.PhoneFrames.Clear();
     }
 
     private void OnDirectUsbFrame(byte[] bgra, int width, int height, long timestamp100ns)
@@ -132,9 +226,15 @@ public sealed class Studio : IDisposable
         // BGRA. Forward decoded pixels directly; do not pretend they are H.264.
         bool becameStreaming = !_usbStreaming;
         _usbStreaming = true;
-        _usbStatus = "USB video is live.";
         Engine.PhoneFrames.Submit(bgra, width, height);
-        if (becameStreaming) PhoneStateChanged?.Invoke();
+        if (becameStreaming)
+        {
+            _usbPhase = UsbPhase.Live;
+            _usbStatus = "USB video is live.";
+            lock (Scene.Sync) Scene.Phone.Visible = true;
+            Scene.NotifyChanged();
+            PhoneStateChanged?.Invoke();
+        }
     }
 
     private void OnVideoPacket(VideoPacket packet)
@@ -210,6 +310,7 @@ public sealed class Studio : IDisposable
     /// <summary>Counts, speed and picture layout of the Windows decoder for the current session, or null when no iPhone is sending.</summary>
     public string? PhoneDecoderStats { get { lock (_decoderLock) return _decoder?.Describe(); } }
     public long PhonePacketsDropped { get { lock (_decoderLock) return _decoder?.PacketsDropped ?? 0; } }
+    public long PhonePacketsWaitingForStart { get { lock (_decoderLock) return _decoder?.PacketsWaitingForStart ?? 0; } }
 
     private void AddReceiverLog(string message)
     {
@@ -279,7 +380,8 @@ public sealed class Studio : IDisposable
         _autosave?.Dispose();
         SaveSession();
         SaveSettings();
-        try { StopUsbAsync().GetAwaiter().GetResult(); } catch (Exception e) { Log.Write("USB shutdown: " + e.Message); }
+        try { Task.Run(StopUsbAsync).Wait(8000); } catch (Exception e) { Log.Write("USB shutdown: " + e.Message); }
+        _usbWatch?.Dispose();
         Receiver.Dispose();
         lock (_decoderLock) { _decoder?.Dispose(); _decoder = null; }
         Engine.Dispose();

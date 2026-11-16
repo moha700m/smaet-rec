@@ -27,6 +27,23 @@ public sealed record CaptureTarget(CaptureKind Kind, IntPtr Handle, string Title
                 window.Title.Contains("Real-time Screen", StringComparison.OrdinalIgnoreCase))
             .ThenByDescending(window => string.Equals(window.ProcessName, "3uTools", StringComparison.OrdinalIgnoreCase))
             .ToList();
+
+    public bool IsRealtimeScreenViewer =>
+        Title.Contains("Realtime Screen", StringComparison.OrdinalIgnoreCase) || Title.Contains("Real-time Screen", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The viewer window that replaces a closed one: a window with the same title if there is one (never the bare
+    /// "3uTools" main window), otherwise one that is clearly the Realtime Screen viewer. Null when none qualifies.
+    /// </summary>
+    public static CaptureTarget? Pick3uToolsReplacement(CaptureTarget lost, IReadOnlyList<CaptureTarget> windows)
+    {
+        var live = windows.Where(w => w.Kind == CaptureKind.Window && w.Handle != lost.Handle).ToList();
+        if (lost.Title.Length > 0 && !lost.Title.Equals("3uTools", StringComparison.OrdinalIgnoreCase) &&
+            live.FirstOrDefault(w => w.Title == lost.Title) is { } same)
+            return same;
+        return live.FirstOrDefault(w => w.IsRealtimeScreenViewer);
+    }
+
     public static List<CaptureTarget> Monitors()
     {
         var list = new List<CaptureTarget>();

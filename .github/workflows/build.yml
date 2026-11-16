@@ -90,18 +90,58 @@ jobs:
           if (!(Test-Path $iscc)) { choco install innosetup -y --no-progress }
           & $iscc "/DAppVersion=${{ steps.version.outputs.value }}" installer\SmaetRec.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Installer smoke test (silent install, check files, uninstall)
+      - name: Portable package test (extract, check files, run, close)
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem publish\SmaetRec-*-win-x64.zip | Select-Object -First 1
+          $dest = Join-Path $env:RUNNER_TEMP "portable"
+          Expand-Archive $zip.FullName -DestinationPath $dest -Force
+          $root = Join-Path $dest "SmaetRec"
+          foreach ($f in "SmaetRec.exe","SmaetRec.dll","SmaetRec.Media.dll","SmaetRec.AirPlay.dll","SmaetRec.Core.dll","coreclr.dll","hostfxr.dll","wpfgfx_cor3.dll","usb\iphone-usb-host.exe","usb\iPhoneMirror.Core.dll","usb\iPhoneMirror.Driver.exe","usb\LICENSE-GPL-3.0.txt","usb-host-source.zip","LICENSE","THIRD-PARTY-NOTICES.md","README.md") {
+            if (!(Test-Path (Join-Path $root $f))) { throw "portable package is missing $f" }
+          }
+          Write-Host "USB runtime files:"; Get-ChildItem (Join-Path $root "usb") | ForEach-Object { Write-Host "  $($_.Name)  $($_.Length)" }
+          $p = Start-Process (Join-Path $root "SmaetRec.exe") -ArgumentList "--dev-simulated-source" -PassThru
+          Start-Sleep -Seconds 8
+          if ($p.HasExited) { throw "portable app exited early with code $($p.ExitCode)" }
+          $p.Refresh()
+          Write-Host "Portable app running: $([math]::Round($p.WorkingSet64/1MB)) MB, $($p.Threads.Count) threads"
+          $null = $p.CloseMainWindow()
+          if (!$p.WaitForExit(15000)) { $p.Kill(); throw "portable app did not close" }
+          $left = Get-Process iphone-usb-host -ErrorAction SilentlyContinue
+          if ($left) { throw "a USB host process was left behind" }
+      - name: Installer test (install, run, uninstall, reinstall)
         shell: pwsh
         run: |
           $setup = Get-ChildItem publish\SmaetRec-Setup-*.exe | Select-Object -First 1
-          $p = Start-Process $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "installer exit code $($p.ExitCode)" }
           $exe = "$env:ProgramFiles\SMAET REC\SmaetRec.exe"
-          if (!(Test-Path $exe)) { throw "installed program not found" }
-          Write-Host "Installed: $exe ($((Get-Item $exe).VersionInfo.ProductVersion))"
-          netsh advfirewall firewall show rule name="SMAET REC" | Select-Object -First 6
-          $u = Start-Process "$env:ProgramFiles\SMAET REC\unins000.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -Wait -PassThru
-          if ($u.ExitCode -ne 0) { throw "uninstaller exit code $($u.ExitCode)" }
+          foreach ($round in 1,2) {
+            $p = Start-Process $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "installer exit code $($p.ExitCode) (round $round)" }
+            if (!(Test-Path $exe)) { throw "installed program not found (round $round)" }
+            if (!(Test-Path "$env:ProgramFiles\SMAET REC\usb\iphone-usb-host.exe")) { throw "installed USB host not found" }
+            Write-Host "Round ${round}: installed $exe ($((Get-Item $exe).VersionInfo.ProductVersion))"
+            $rules = netsh advfirewall firewall show rule name="SMAET REC"
+            if (!($rules -match "SMAET REC")) { throw "firewall rule missing after install" }
+            $app = Start-Process $exe -ArgumentList "--dev-simulated-source" -PassThru
+            Start-Sleep -Seconds 8
+            if ($app.HasExited) { throw "installed app exited early with code $($app.ExitCode)" }
+            $null = $app.CloseMainWindow()
+            if (!$app.WaitForExit(15000)) { $app.Kill(); throw "installed app did not close" }
+            $u = Start-Process "$env:ProgramFiles\SMAET REC\unins000.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -Wait -PassThru
+            if ($u.ExitCode -ne 0) { throw "uninstaller exit code $($u.ExitCode)" }
+            Start-Sleep -Seconds 2
+            if (Test-Path $exe) { throw "program still present after uninstall" }
+            $after = netsh advfirewall firewall show rule name="SMAET REC"
+            if ($after -match "Rule Name") { throw "firewall rule left behind after uninstall" }
+          }
+      - name: Checksums
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem publish\SmaetRec-Setup-*.exe, publish\SmaetRec-*-win-x64.zip
+          $lines = $files | ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)  $($_.Length) bytes" }
+          $lines | Set-Content publish\SHA256SUMS.txt -Encoding utf8
+          $lines | ForEach-Object { Write-Host $_ }
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
@@ -112,6 +152,11 @@ jobs:
         with:
           name: SmaetRec-portable
           path: publish/SmaetRec-*-win-x64.zip
+      - name: Upload checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: SHA256SUMS
+          path: publish/SHA256SUMS.txt
       - name: Release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
@@ -119,3 +164,4 @@ jobs:
           files: |
             publish/SmaetRec-Setup-*.exe
             publish/SmaetRec-*-win-x64.zip
+            publish/SHA256SUMS.txt

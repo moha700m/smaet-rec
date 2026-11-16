@@ -102,7 +102,8 @@
                             Click="Open3uToolsScreen_Click"/>
                     <Button x:Name="InstallUsbDriver" Style="{StaticResource PlainButton}" Content="USB driver setup / repair" HorizontalAlignment="Left" Margin="0,4,0,0"
                             Click="InstallUsbDriver_Click"/>
-                    <Button x:Name="ConnectUsb" Style="{StaticResource AccentButton}" Content="Connect USB" HorizontalAlignment="Left" Margin="0,8,0,0" IsEnabled="False" Click="ConnectUsb_Click"/>
+                    <Button x:Name="ConnectUsb" Style="{StaticResource AccentButton}" Content="{Binding [UsbConnect], Source={x:Static core:Loc.Instance}}" HorizontalAlignment="Left" Margin="0,8,0,0" IsEnabled="False" Click="ConnectUsb_Click"/>
+                    <TextBlock x:Name="UsbProgress" TextWrapping="Wrap" Foreground="{StaticResource SubtleBrush}" FontSize="12.5" Margin="0,6,0,0" Visibility="Collapsed" FlowDirection="LeftToRight"/>
                     <TextBlock Text="{Binding [UsbNote], Source={x:Static core:Loc.Instance}}" TextWrapping="Wrap" Foreground="{StaticResource SubtleBrush}" FontSize="12.5" Margin="0,12,0,0"/>
                 </StackPanel>
             </Border>
