@@ -13,10 +13,18 @@ The application starts `usb/iphone-usb-host.exe` with:
 --smaet-ipc --pipe <pipe-name> --device-serial <Windows-USB-serial> --video bgra8
 ```
 
-The adapter enumerates devices through `im_refresh_devices_ex`, matches the
-selected serial to exactly one attached device, and passes the authoritative
-usbmux UDID to `im_session_create`. Ambiguous or missing matches fail closed.
-It forwards decoded BGRA8 frames from the upstream C ABI.
+The adapter enumerates devices through `im_refresh_devices_ex` without forcing
+an additional Lockdown metadata refresh, matches the selected serial to exactly
+one attached device, and passes the authoritative usbmux UDID to
+`im_session_create`. Ambiguous or missing matches fail closed with the
+discovery error returned to the UI. The adapter reports USB activation,
+interface re-enumeration, QuickTime handshake, and streaming states, and
+forwards decoded BGRA8 frames from the upstream C ABI.
+
+The WPF client treats named-pipe connection as process startup only. It does
+not report USB connected until the first valid BGRA frame arrives. If no frame
+arrives within 55 seconds, it stops the host and reports the last native stage.
+
 
 ## IPC v2 framing
 
