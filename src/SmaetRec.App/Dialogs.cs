@@ -48,7 +48,7 @@ public sealed class TextEntryWindow : Window
 }
 
 /// <summary>"What do you want to show?" — whole screens as big buttons, then a list of open windows.</summary>
-public sealed internal sealed class ScreenPickerWindow : Window
+public sealed class ScreenPickerWindow : Window
 {
     public CaptureTarget? Selected { get; private set; }
     public bool HideRequested { get; private set; }
