@@ -119,21 +119,46 @@ bool ConnectPipe(const std::wstring& name) {
     return false;
 }
 
-bool FindDevice(const std::wstring& requested, std::wstring& udid) {
+bool FindDevice(const std::wstring& requested, std::wstring& udid,
+                std::wstring& error) {
     std::uint32_t count = 0;
-    auto result = im_refresh_devices_ex(nullptr, &count, 1);
-    if (result != static_cast<std::int32_t>(iPhoneMirror::Result::Ok) &&
-        result != static_cast<std::int32_t>(iPhoneMirror::Result::BufferTooSmall)) return false;
-    if (count == 0 || count > 128) return false;
+    // Metadata/Lockdown refresh is not needed to resolve the already-enumerated USB UDID.
+    // Avoid a second pairing round-trip before QuickTime capture begins.
+    auto result = im_refresh_devices_ex(nullptr, &count, 0);
+    if (result != static_cast<std::int32_t>(iPhoneMirror::Result::Ok)) {
+        const wchar_t* detail = im_last_error();
+        error = detail && *detail ? detail : L"Apple usbmux device discovery failed.";
+        return false;
+    }
+    if (count == 0) {
+        error = L"Apple usbmux did not report a connected iPhone. Unlock it, accept Trust This Computer, and reconnect USB.";
+        return false;
+    }
+    if (count > 128) {
+        error = L"Apple usbmux reported an unexpected number of connected devices.";
+        return false;
+    }
     std::vector<iPhoneMirror::DeviceInfo> devices(count);
-    for (auto& d : devices) { std::memset(&d, 0, sizeof(d)); d.struct_size = sizeof(d); d.api_version = iPhoneMirror::ApiVersion; }
-    result = im_refresh_devices_ex(devices.data(), &count, 1);
-    if (result != static_cast<std::int32_t>(iPhoneMirror::Result::Ok)) return false;
+    for (auto& d : devices) {
+        std::memset(&d, 0, sizeof(d));
+        d.struct_size = sizeof(d);
+        d.api_version = iPhoneMirror::ApiVersion;
+    }
+    result = im_refresh_devices_ex(devices.data(), &count, 0);
+    if (result != static_cast<std::int32_t>(iPhoneMirror::Result::Ok)) {
+        const wchar_t* detail = im_last_error();
+        error = detail && *detail ? detail : L"Could not read the Apple USB device list.";
+        return false;
+    }
 
     const auto wanted = Normalize(requested);
+    if (wanted.empty()) {
+        error = L"Windows did not provide a usable Apple USB device serial.";
+        return false;
+    }
     std::vector<std::wstring> matches;
     for (const auto& d : devices) {
-        if (!d.usb_connected || d.udid[0] == L'\0') continue;
+        if (!d.usb_connected || d.udid[0] == L'\\0') continue;
         const std::wstring candidate(d.udid);
         const auto normalized = Normalize(candidate);
         const bool exact = normalized == wanted;
@@ -141,7 +166,12 @@ bool FindDevice(const std::wstring& requested, std::wstring& udid) {
             (normalized.ends_with(wanted) || wanted.ends_with(normalized));
         if (exact || suffix) matches.push_back(candidate);
     }
-    if (matches.size() != 1) return false;
+    if (matches.size() != 1) {
+        error = matches.empty()
+            ? L"Windows detected the Apple USB device, but its serial did not match any paired usbmux UDID. Unlock the iPhone, tap Trust, then reconnect it."
+            : L"More than one Apple usbmux device matched the selected USB serial; refusing an ambiguous connection.";
+        return false;
+    }
     udid = matches.front();
     return true;
 }
@@ -149,6 +179,7 @@ bool FindDevice(const std::wstring& requested, std::wstring& udid) {
 int Run(const std::wstring& pipeName, const std::wstring& requestedSerial) {
     if (pipeName.empty() || requestedSerial.empty()) return 2;
     if (!ConnectPipe(pipeName)) return 3;
+    SendStatus(L"USB host started; checking the iPhone capture engine.");
     if (im_api_version() != iPhoneMirror::ApiVersion) {
         SendError(L"iPhoneMirror Core API version mismatch.");
         return 4;
@@ -160,14 +191,17 @@ int Run(const std::wstring& pipeName, const std::wstring& requestedSerial) {
         return 5;
     }
 
+    SendStatus(L"Apple capture engine initialized; discovering the trusted USB device.");
     int exitCode = 0;
     iPhoneMirror::SessionHandle session = 0;
     bool sessionCreated = false;
     std::wstring udid;
-    if (!FindDevice(requestedSerial, udid)) {
-        SendError(L"Connected Apple device could not be matched to the selected USB serial. Unlock the iPhone and trust this computer.");
+    std::wstring deviceError;
+    if (!FindDevice(requestedSerial, udid, deviceError)) {
+        SendError(deviceError.empty() ? L"Connected Apple device could not be matched to the selected USB serial." : deviceError);
         exitCode = 6;
     } else {
+        SendStatus(L"iPhone matched through Apple usbmux; starting QuickTime USB handshake.");
         iPhoneMirror::CaptureOptions options{};
         options.struct_size = sizeof(options);
         options.api_version = iPhoneMirror::ApiVersion;
@@ -177,6 +211,7 @@ int Run(const std::wstring& pipeName, const std::wstring& requestedSerial) {
         options.play_audio = 0;
         options.audio_volume = 0.0f;
 
+        SendStatus(L"Opening the iPhone QuickTime capture interface. Keep the phone unlocked.");
         const auto create = im_session_create(udid.c_str(), &options, &session);
         if (create != static_cast<std::int32_t>(iPhoneMirror::Result::Ok)) {
             const wchar_t* detail = im_last_error();
@@ -184,9 +219,10 @@ int Run(const std::wstring& pipeName, const std::wstring& requestedSerial) {
             exitCode = 7;
         } else {
             sessionCreated = true;
-            SendStatus(L"iPhone USB session created; waiting for decoded video frames.");
+            SendStatus(L"QuickTime USB session created; waiting for the first decoded video frame.");
             std::int64_t lastTimestamp = 0;
             bool announcedStreaming = false;
+            int lastAnnouncedState = -1;
             while (g_running.load()) {
                 iPhoneMirror::CaptureStatus status{};
                 status.struct_size = sizeof(status);
@@ -197,6 +233,22 @@ int Run(const std::wstring& pipeName, const std::wstring& requestedSerial) {
                     SendError(detail && *detail ? detail : L"Could not read iPhone capture status.");
                     exitCode = 8;
                     break;
+                }
+                const int stateValue = static_cast<int>(status.state);
+                if (stateValue != lastAnnouncedState) {
+                    std::wstring stage;
+                    switch (status.state) {
+                    case iPhoneMirror::CaptureState::ActivatingUsb: stage = L"Activating the Apple USB capture configuration."; break;
+                    case iPhoneMirror::CaptureState::WaitingForDevice: stage = L"Waiting for the iPhone USB interface to re-enumerate."; break;
+                    case iPhoneMirror::CaptureState::Handshaking: stage = L"Negotiating the iPhone QuickTime video stream."; break;
+                    case iPhoneMirror::CaptureState::Streaming: stage = L"iPhone video stream is active."; break;
+                    case iPhoneMirror::CaptureState::Stopping: stage = L"Stopping the iPhone USB capture session."; break;
+                    case iPhoneMirror::CaptureState::Stopped: stage = L"iPhone USB capture session stopped."; break;
+                    default: stage = L"Preparing the iPhone USB video stream."; break;
+                    }
+                    if (status.message[0] != L'\\0') stage += L" " + std::wstring(status.message);
+                    SendStatus(stage);
+                    lastAnnouncedState = stateValue;
                 }
                 if (status.state == iPhoneMirror::CaptureState::Error) {
                     SendError(status.message[0] ? status.message : L"iPhone USB capture failed.");
