@@ -98,6 +98,8 @@
                     </StackPanel>
                     <Button x:Name="GetAppleDevices" Style="{StaticResource PlainButton}" Content="{Binding [GetAppleDevices], Source={x:Static core:Loc.Instance}}" HorizontalAlignment="Left" Margin="0,6,0,0"
                             Visibility="Collapsed" Click="GetAppleDevices_Click"/>
+                    <Button x:Name="ThreeUToolsScreen" Style="{StaticResource AccentButton}" Content="{Binding [Open3uToolsScreen], Source={x:Static core:Loc.Instance}}" HorizontalAlignment="Left" Margin="0,4,0,0"
+                            Click="Open3uToolsScreen_Click"/>
                     <Button x:Name="InstallUsbDriver" Style="{StaticResource PlainButton}" Content="USB driver setup / repair" HorizontalAlignment="Left" Margin="0,4,0,0"
                             Click="InstallUsbDriver_Click"/>
                     <Button x:Name="ConnectUsb" Style="{StaticResource AccentButton}" Content="Connect USB" HorizontalAlignment="Left" Margin="0,8,0,0" IsEnabled="False" Click="ConnectUsb_Click"/>
