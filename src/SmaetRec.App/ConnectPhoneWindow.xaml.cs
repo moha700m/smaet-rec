@@ -131,40 +131,10 @@ public partial class ConnectPhoneWindow : Window
                 Process.Start(new ProcessStartInfo(executable) { UseShellExecute = true });
             }
 
-            await Task.Delay(650);
-            var instruction = MessageBox.Show(this, Loc.T("ThreeUToolsLaunchHint"),
-                Loc.T("Open3uToolsScreen"), MessageBoxButton.OKCancel, MessageBoxImage.Information);
-            if (instruction != MessageBoxResult.OK) return;
-
-            var candidates = await Task.Run(CaptureTarget.ThreeUToolsWindows);
-            ScreenPickerWindow picker;
-            if (candidates.Count > 0)
-            {
-                picker = new ScreenPickerWindow(
-                    _studio.Engine.ScreenActive,
-                    candidates,
-                    Loc.T("ThreeUToolsWindowTitle"),
-                    Loc.T("ThreeUToolsWindowListTitle"),
-                    showMonitors: false)
-                { Owner = this };
-            }
-            else
-            {
-                var fallback = MessageBox.Show(this, Loc.T("ThreeUToolsWindowMissingFallback"),
-                    Loc.T("Open3uToolsScreen"), MessageBoxButton.YesNo, MessageBoxImage.Information);
-                if (fallback != MessageBoxResult.Yes) return;
-
-                var allWindows = await Task.Run(CaptureTarget.Windows);
-                picker = new ScreenPickerWindow(
-                    _studio.Engine.ScreenActive,
-                    allWindows,
-                    Loc.T("ThreeUToolsWindowTitle"),
-                    Loc.T("Windows"),
-                    showMonitors: false)
-                { Owner = this };
-            }
-
+            await Task.Delay(350);
+            var picker = new ThreeUToolsWindowPicker { Owner = this };
             if (picker.ShowDialog() != true || picker.Selected is null) return;
+
             if (Owner is MainWindow main)
             {
                 main.ShowCapturedWindow(picker.Selected);
