@@ -50,16 +50,13 @@ public sealed record CaptureTarget(CaptureKind Kind, IntPtr Handle, string Title
         uint self = (uint)Environment.ProcessId;
         EnumWindows((hwnd, _) =>
         {
-            if (!IsWindowVisible(hwnd) || IsIconic(hwnd) || GetWindowTextLength(hwnd) == 0) return true;
+            if (!IsWindowVisible(hwnd) || IsIconic(hwnd)) return true;
             long ex = GetWindowLongPtr(hwnd, GWL_EXSTYLE).ToInt64();
             if ((ex & WS_EX_TOOLWINDOW) != 0 || (ex & WS_EX_NOACTIVATE) != 0) return true;
             if (DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, out int cloaked, 4) == 0 && cloaked != 0) return true;
             GetWindowThreadProcessId(hwnd, out uint pid);
             if (pid == self) return true;
-            var bounds = WindowBounds(hwnd);
-            if (bounds.Width < 80 || bounds.Height < 60) return true;
-            var sb = new StringBuilder(260);
-            GetWindowText(hwnd, sb, sb.Capacity);
+
             string processName = "";
             try
             {
@@ -69,6 +66,17 @@ public sealed record CaptureTarget(CaptureKind Kind, IntPtr Handle, string Title
             catch (Exception error) when (error is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
             {
             }
+
+            var sb = new StringBuilder(260);
+            GetWindowText(hwnd, sb, sb.Capacity);
+            // Some 3uTools viewer builds expose a visible top-level HWND without
+            // a caption. Keep those windows discoverable; omit empty-caption
+            // utility windows from every other process.
+            bool isThreeUTools = string.Equals(processName, "3uTools", StringComparison.OrdinalIgnoreCase);
+            if (GetWindowTextLength(hwnd) == 0 && !isThreeUTools) return true;
+
+            var bounds = WindowBounds(hwnd);
+            if (bounds.Width < 80 || bounds.Height < 60) return true;
             list.Add(new CaptureTarget(CaptureKind.Window, hwnd, sb.ToString(), bounds.Left, bounds.Top, bounds.Width, bounds.Height, false)
             {
                 ProcessName = processName
