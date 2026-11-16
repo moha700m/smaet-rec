@@ -158,7 +158,7 @@ bool FindDevice(const std::wstring& requested, std::wstring& udid,
     }
     std::vector<std::wstring> matches;
     for (const auto& d : devices) {
-        if (!d.usb_connected || d.udid[0] == L'\\0') continue;
+        if (!d.usb_connected || d.udid[0] == L'\0') continue;
         const std::wstring candidate(d.udid);
         const auto normalized = Normalize(candidate);
         const bool exact = normalized == wanted;
