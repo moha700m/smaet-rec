@@ -81,8 +81,8 @@
                         <TextBlock x:Name="UsbDriver" Margin="8,0,0,0" TextWrapping="Wrap" MaxWidth="330" Foreground="{StaticResource SubtleBrush}" FontSize="13"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,7">
-                        <Ellipse x:Name="UsbNetworkDot" Width="9" Height="9" Fill="{StaticResource SubtleBrush}" VerticalAlignment="Center"/>
-                        <TextBlock x:Name="UsbNetwork" Margin="8,0,0,0" TextWrapping="Wrap" MaxWidth="330" Foreground="{StaticResource SubtleBrush}" FontSize="13"/>
+                        <Ellipse x:Name="UsbServiceDot" Width="9" Height="9" Fill="{StaticResource SubtleBrush}" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="UsbService" Margin="8,0,0,0" TextWrapping="Wrap" MaxWidth="330" Foreground="{StaticResource SubtleBrush}" FontSize="13"/>
                     </StackPanel>
                     <Button x:Name="GetAppleDevices" Style="{StaticResource PlainButton}" Content="{Binding [GetAppleDevices], Source={x:Static core:Loc.Instance}}" HorizontalAlignment="Left" Margin="0,6,0,0"
                             Visibility="Collapsed" Click="GetAppleDevices_Click"/>
