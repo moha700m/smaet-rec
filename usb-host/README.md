@@ -20,7 +20,7 @@ cmake --build build/usb-host --config Release --target iphone-usb-host
 
 The resulting runtime directory is `build/usb-host/package/usb`. It contains
 the host executable, iPhoneMirror.Core.dll and libusb-1.0.dll. The application
-launches the host from `resources/usb/iphone-usb-host.exe`.
+launches the host from `usb/iphone-usb-host.exe`.
 
 The MIT WPF process never loads the GPL DLL. Keep the adapter and its runtime
 as a separate process and preserve this directory's GPL licensing notices.
