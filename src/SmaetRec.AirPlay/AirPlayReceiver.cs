@@ -357,7 +357,7 @@ public sealed class AirPlayReceiver : IDisposable
         ["pi"] = PairingId,
         ["pk"] = (byte[])_edPublic.Clone(),
         ["sourceVersion"] = SourceVersion,
-        ["statusFlags"] = 4,
+        ["statusFlags"] = 68,
         ["vv"] = 2,
     };
 
