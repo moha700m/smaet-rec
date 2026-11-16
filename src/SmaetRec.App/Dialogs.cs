@@ -70,7 +70,7 @@ public sealed class ScreenPickerWindow : Window
 
         var monitors = new WrapPanel();
         int n = 1;
-        foreach (var monitor in showMonitors ? CaptureTarget.Monitors() : [])
+        foreach (var monitor in showMonitors ? CaptureTarget.Monitors() : new List<CaptureTarget>())
         {
             var button = new Button
             {
