@@ -124,7 +124,12 @@ public partial class ConnectionDiagnosticsWindow : Window
             FirewallDot.Fill = Res(_firewall switch { true => "GreenBrush", false => "RedBrush", _ => "AmberBrush" });
 
             _usb = await Task.Run(UsbPhoneDetector.Check);
-            if (!_usb.AppleUsbDriverInstalled)
+            if (_usb.PhonePluggedIn && !_usb.ParentCompositeDriverReady)
+            {
+                DriverText.Text = Loc.T("DiagAppleParentDriverWrong", _usb.ParentDriverService ?? "unknown");
+                DriverDot.Fill = Res("RedBrush");
+            }
+            else if (!_usb.AppleUsbDriverInstalled)
             {
                 DriverText.Text = Loc.T("DiagAppleUsbDriverMissing");
                 DriverDot.Fill = Res("AmberBrush");
