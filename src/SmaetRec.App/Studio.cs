@@ -154,7 +154,7 @@ public sealed class Studio : IDisposable
         PhoneStateChanged?.Invoke();
     }
 
-    public bool UsbSessionActive => _usbClient != null;
+    public bool UsbSessionActive => _usbClient?.IsActive == true;
     public bool UsbConnected => _usbStreaming;
     public bool PhoneConnected => Receiver.State == ReceiverState.Connected || UsbConnected || Engine.PhoneFrames.IsSimulated;
 
