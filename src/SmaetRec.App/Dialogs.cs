@@ -141,7 +141,7 @@ public sealed class ThreeUToolsWindowPicker : Window
     private readonly TextBlock _status;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(1200) };
     private bool _refreshing;
-    private IntPtr[] _lastHandles = [];
+    private string[] _lastWindowSignatures = [];
 
     public CaptureTarget? Selected { get; private set; }
 
@@ -245,10 +245,11 @@ public sealed class ThreeUToolsWindowPicker : Window
             var windows = CaptureTarget.ThreeUToolsWindows()
                 .Where(window => window.StillExists)
                 .ToArray();
-            var handles = windows.Select(window => window.Handle).ToArray();
-            if (!force && handles.SequenceEqual(_lastHandles)) return;
+            var signatures = windows.Select(window =>
+                $"{window.Handle.ToInt64():X}:{window.Title}:{window.Width}x{window.Height}").ToArray();
+            if (!force && signatures.SequenceEqual(_lastWindowSignatures, StringComparer.Ordinal)) return;
 
-            _lastHandles = handles;
+            _lastWindowSignatures = signatures;
             _items.Children.Clear();
             if (windows.Length == 0)
             {
