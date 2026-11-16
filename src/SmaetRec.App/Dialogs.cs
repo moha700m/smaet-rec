@@ -53,19 +53,24 @@ public sealed class ScreenPickerWindow : Window
     public CaptureTarget? Selected { get; private set; }
     public bool HideRequested { get; private set; }
 
-    public ScreenPickerWindow(bool screenActive)
+    public ScreenPickerWindow(
+        bool screenActive,
+        IReadOnlyList<CaptureTarget>? windowTargets = null,
+        string? pickerTitle = null,
+        string? windowsTitle = null,
+        bool showMonitors = true)
     {
         DialogSetup.Apply(this);
-        Title = Loc.T("PickScreenTitle");
+        Title = pickerTitle ?? Loc.T("PickScreenTitle");
         Width = 560;
         SizeToContent = SizeToContent.Height;
         var subtle = (Brush)FindResource("SubtleBrush");
         var root = new StackPanel { Margin = new Thickness(22) };
-        root.Children.Add(new TextBlock { Text = Loc.T("PickScreenTitle"), FontSize = 20, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 14) });
+        root.Children.Add(new TextBlock { Text = pickerTitle ?? Loc.T("PickScreenTitle"), FontSize = 20, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 14) });
 
         var monitors = new WrapPanel();
         int n = 1;
-        foreach (var monitor in CaptureTarget.Monitors())
+        foreach (var monitor in showMonitors ? CaptureTarget.Monitors() : [])
         {
             var button = new Button
             {
@@ -78,12 +83,12 @@ public sealed class ScreenPickerWindow : Window
             monitors.Children.Add(button);
             n++;
         }
-        root.Children.Add(monitors);
+        if (showMonitors) root.Children.Add(monitors);
 
-        var windows = CaptureTarget.Windows();
+        var windows = windowTargets ?? CaptureTarget.Windows();
         if (windows.Count > 0)
         {
-            root.Children.Add(new TextBlock { Text = Loc.T("Windows"), Foreground = subtle, Margin = new Thickness(0, 8, 0, 8) });
+            root.Children.Add(new TextBlock { Text = windowsTitle ?? Loc.T("Windows"), Foreground = subtle, Margin = new Thickness(0, 8, 0, 8) });
             var list = new StackPanel();
             foreach (var w in windows.Take(40))
             {
@@ -97,6 +102,16 @@ public sealed class ScreenPickerWindow : Window
                 list.Children.Add(button);
             }
             root.Children.Add(new ScrollViewer { Content = list, MaxHeight = 260, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+        }
+        else if (windowTargets is not null)
+        {
+            root.Children.Add(new TextBlock
+            {
+                Text = Loc.T("ThreeUToolsWindowMissing"),
+                Foreground = subtle,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 8, 0, 8)
+            });
         }
 
         var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 16, 0, 0) };
