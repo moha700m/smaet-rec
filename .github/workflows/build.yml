@@ -208,9 +208,28 @@ jobs:
               Write-Host "No SMAET REC or iPhone USB host processes remain."
             }
 
-            $pending = Get-ItemPropertyValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager" -Name PendingFileRenameOperations -ErrorAction SilentlyContinue
+            $pending = $null
+            try {
+              $sessionManagerKey = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey(
+                "SYSTEM\CurrentControlSet\Control\Session Manager")
+              if ($null -ne $sessionManagerKey) {
+                try {
+                  $pending = $sessionManagerKey.GetValue("PendingFileRenameOperations", $null)
+                }
+                finally {
+                  $sessionManagerKey.Dispose()
+                }
+              }
+            }
+            catch {
+              Write-Host "Pending file rename state unavailable: $($_.Exception.Message)"
+            }
+
             if ($pending) {
               Write-Host ("PendingFileRenameOperations:" + [Environment]::NewLine + ($pending -join [Environment]::NewLine))
+            }
+            else {
+              Write-Host "No PendingFileRenameOperations registry value is present."
             }
 
             Get-ChildItem -LiteralPath $diagDir -File -ErrorAction SilentlyContinue |
@@ -297,11 +316,21 @@ jobs:
           }
           catch {
             Write-Host "Installer verification failed: $($_.Exception.Message)"
-            Write-DiagnosticState -Stage "Failure"
+            try {
+              Write-DiagnosticState -Stage "Failure"
+            }
+            catch {
+              Write-Warning "Failure diagnostics could not be collected: $($_.Exception.Message)"
+            }
             throw
           }
           finally {
-            Write-DiagnosticState -Stage "Final"
+            try {
+              Write-DiagnosticState -Stage "Final"
+            }
+            catch {
+              Write-Warning "Final diagnostics could not be collected: $($_.Exception.Message)"
+            }
           }
 
           Write-Host "Installer install/run/uninstall/reinstall verification passed."
