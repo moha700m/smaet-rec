@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cwctype>
+#include <string_view>
 #include <iostream>
 #include <limits>
 #include <string>
@@ -72,31 +73,40 @@ bool SendRecord(const std::string& json, const std::uint8_t* payload = nullptr,
     return payloadBytes == 0 || WriteAll(payload, payloadBytes);
 }
 
-bool SendStatus(const std::wstring& message) {
-    // Keep status strings ASCII-safe and bounded; detailed diagnostics are also
-    // available in the native engine's own log.
-    std::string safe;
-    safe.reserve(std::min<std::size_t>(message.size(), 400));
-    for (wchar_t c : message) {
-        if (safe.size() >= 400) break;
-        safe.push_back(c >= 32 && c <= 126 ? static_cast<char>(c) : ' ');
+std::string ToUtf8(const std::wstring& value) {
+    if (value.empty()) return {};
+    const int count = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
+        static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+    if (count <= 0) return "Native USB error";
+    std::string utf8(static_cast<std::size_t>(count), '\\0');
+    WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
+        static_cast<int>(value.size()), utf8.data(), count, nullptr, nullptr);
+    return utf8;
+}
+
+std::string JsonEscape(std::string_view value) {
+    std::string escaped;
+    escaped.reserve(value.size() + 16);
+    constexpr char hex[] = "0123456789abcdef";
+    for (unsigned char c : value) {
+        if (c == '"' || c == '\\\\') { escaped.push_back('\\\\'); escaped.push_back(static_cast<char>(c)); }
+        else if (c < 0x20) {
+            escaped += "\\u00";
+            escaped.push_back(hex[c >> 4]);
+            escaped.push_back(hex[c & 0x0f]);
+        } else escaped.push_back(static_cast<char>(c));
     }
-    std::string json = "{\"type\":\"status\",\"message\":\"";
-    for (char c : safe) { if (c == '\\' || c == '"') json.push_back('\\'); json.push_back(c); }
-    json += "\"}";
-    return SendRecord(json);
+    return escaped;
+}
+
+bool SendStatus(const std::wstring& message) {
+    return SendRecord("{\\"type\\":\\"status\\",\\"message\\":\\"" +
+        JsonEscape(ToUtf8(message)) + "\\"}");
 }
 
 bool SendError(const std::wstring& message) {
-    std::string safe;
-    for (wchar_t c : message) {
-        if (safe.size() >= 400) break;
-        safe.push_back(c >= 32 && c <= 126 ? static_cast<char>(c) : ' ');
-    }
-    std::string json = "{\"type\":\"error\",\"message\":\"";
-    for (char c : safe) { if (c == '\\' || c == '"') json.push_back('\\'); json.push_back(c); }
-    json += "\"}";
-    return SendRecord(json);
+    return SendRecord("{\\"type\\":\\"error\\",\\"message\\":\\"" +
+        JsonEscape(ToUtf8(message)) + "\\"}");
 }
 
 bool ConnectPipe(const std::wstring& name) {
@@ -146,7 +156,8 @@ int Run(const std::wstring& pipeName, const std::wstring& requestedSerial) {
     }
     const auto init = im_initialize();
     if (init != static_cast<std::int32_t>(iPhoneMirror::Result::Ok)) {
-        SendError(L"Could not initialize the iPhone USB capture engine.");
+        const wchar_t* detail = im_last_error();
+        SendError(detail && *detail ? detail : L"Could not initialize the iPhone USB capture engine.");
         return 5;
     }
 
@@ -169,7 +180,8 @@ int Run(const std::wstring& pipeName, const std::wstring& requestedSerial) {
 
         const auto create = im_session_create(udid.c_str(), &options, &session);
         if (create != static_cast<std::int32_t>(iPhoneMirror::Result::Ok)) {
-            SendError(L"Could not create the iPhone QuickTime USB capture session. Check Apple device support, trust pairing and USB driver setup.");
+            const wchar_t* detail = im_last_error();
+            SendError(detail && *detail ? detail : L"Could not create the iPhone QuickTime USB capture session. Check Apple device support, trust pairing and USB driver setup.");
             exitCode = 7;
         } else {
             sessionCreated = true;
@@ -182,7 +194,8 @@ int Run(const std::wstring& pipeName, const std::wstring& requestedSerial) {
                 status.api_version = iPhoneMirror::ApiVersion;
                 const auto statusResult = im_session_get_status(session, &status);
                 if (statusResult != static_cast<std::int32_t>(iPhoneMirror::Result::Ok)) {
-                    SendError(L"Could not read iPhone capture status.");
+                    const wchar_t* detail = im_last_error();
+                    SendError(detail && *detail ? detail : L"Could not read iPhone capture status.");
                     exitCode = 8;
                     break;
                 }
