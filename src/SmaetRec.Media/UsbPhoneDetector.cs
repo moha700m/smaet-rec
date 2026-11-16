@@ -7,12 +7,12 @@ namespace SmaetRec.Media;
 /// <summary>What Windows currently knows about an iPhone on a USB cable.</summary>
 public sealed record UsbPhoneStatus(bool PhonePluggedIn, bool AppleDriverInstalled, string? NetworkAddress, string? DeviceId = null)
 {
-    public bool Ready => PhonePluggedIn && AppleDriverInstalled && NetworkAddress != null;
+    public bool Ready => PhonePluggedIn && AppleDriverInstalled;
 }
 
 /// <summary>
 /// Checks the three things the cable method needs: an Apple phone on USB, Apple's device driver,
-/// and the phone's USB network adapter being up (it appears when Personal Hotspot is on).
+/// and optionally reports the USB network adapter for legacy AirPlay diagnostics. Direct USB does not use it.
 /// </summary>
 public static class UsbPhoneDetector
 {
