@@ -17,7 +17,7 @@ public sealed record CaptureTarget(CaptureKind Kind, IntPtr Handle, string Title
         (Title.Contains("Realtime Screen", StringComparison.OrdinalIgnoreCase) ||
          Title.Contains("Real-time Screen", StringComparison.OrdinalIgnoreCase) ||
          Title.Contains("3uTools", StringComparison.OrdinalIgnoreCase) ||
-         ProcessName.Contains("3uTools", StringComparison.OrdinalIgnoreCase));
+         string.Equals(ProcessName, "3uTools", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>3uTools windows are ordered with a titled Realtime Screen viewer first.</summary>
     public static List<CaptureTarget> ThreeUToolsWindows() =>
@@ -25,7 +25,7 @@ public sealed record CaptureTarget(CaptureKind Kind, IntPtr Handle, string Title
             .OrderByDescending(window =>
                 window.Title.Contains("Realtime Screen", StringComparison.OrdinalIgnoreCase) ||
                 window.Title.Contains("Real-time Screen", StringComparison.OrdinalIgnoreCase))
-            .ThenByDescending(window => window.ProcessName.Contains("3uTools", StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(window => string.Equals(window.ProcessName, "3uTools", StringComparison.OrdinalIgnoreCase))
             .ToList();
     public static List<CaptureTarget> Monitors()
     {
