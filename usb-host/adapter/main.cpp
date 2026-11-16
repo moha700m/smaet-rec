@@ -161,16 +161,15 @@ bool FindDevice(const std::wstring& requested, std::wstring& udid,
     std::vector<std::wstring> matches;
     for (const auto& d : devices) {
         if (!d.usb_connected || d.udid[0] == L'\0') continue;
+        // The Windows PnP serial and usbmux UDID must identify the same
+        // physical phone. Partial/suffix matching can select another device
+        // and will fail the capture engine's own exact-serial preflight.
         const std::wstring candidate(d.udid);
-        const auto normalized = Normalize(candidate);
-        const bool exact = normalized == wanted;
-        const bool suffix = wanted.size() >= 16 && normalized.size() >= 16 &&
-            (normalized.ends_with(wanted) || wanted.ends_with(normalized));
-        if (exact || suffix) matches.push_back(candidate);
+        if (Normalize(candidate) == wanted) matches.push_back(candidate);
     }
     if (matches.size() != 1) {
         error = matches.empty()
-            ? L"Windows detected the Apple USB device, but its serial did not match any paired usbmux UDID. Unlock the iPhone, tap Trust, then reconnect it."
+            ? L"No exact USB serial match was found in Apple usbmux. Unlock the iPhone, tap Trust This Computer, and reconnect the cable. Do not connect multiple Apple devices while selecting the phone."
             : L"More than one Apple usbmux device matched the selected USB serial; refusing an ambiguous connection.";
         return false;
     }
