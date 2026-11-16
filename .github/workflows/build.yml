@@ -1,11 +1,12 @@
 name: build
 
 on:
+  # Every branch push (including PR heads in this same repository) runs
+  # the full Windows build once. Avoid duplicate push + pull_request builds
+  # racing under the same cancellation group.
   push:
     branches: ["**"]
     tags: ["v*"]
-  pull_request:
-    branches: ["main"]
 
 permissions:
   contents: write
