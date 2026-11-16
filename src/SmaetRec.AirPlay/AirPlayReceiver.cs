@@ -45,6 +45,8 @@ public sealed class AirPlayReceiver : IDisposable
     public long MirrorKeyFrames => _mirrorDecoder?.KeyFrames ?? 0;
     public long MirrorInvalid => _mirrorDecoder?.InvalidPackets ?? 0;
     public bool MirrorCodecUnsupported => _mirrorDecoder?.UnsupportedCodec ?? false;
+    /// <summary>False while pictures arrive but the stream's SPS/PPS were never found; nothing can be shown in that state.</summary>
+    public bool MirrorHasParameterSets => _mirrorDecoder?.HasParameterSets ?? false;
     public string? MirrorIssue => _mirrorDecoder?.LastIssue ?? _lastMirrorIssue;
     /// <summary>Which key derivation produced valid H.264: "FairPlay" or "FairPlay+ECDH".</summary>
     public string? MirrorKeyVariant { get; private set; }
@@ -264,6 +266,7 @@ public sealed class AirPlayReceiver : IDisposable
             try { client = await listener.AcceptTcpClientAsync(ct).ConfigureAwait(false); }
             catch (Exception e) when (e is OperationCanceledException or SocketException or ObjectDisposedException) { return; }
             client.NoDelay = true;
+            EnableDeadPeerDetection(client.Client);
             _ = Task.Run(async () =>
             {
                 try { await handler(client, ct).ConfigureAwait(false); }
@@ -272,6 +275,23 @@ public sealed class AirPlayReceiver : IDisposable
                 finally { client.Dispose(); }
             }, ct);
         }
+    }
+
+    /// <summary>
+    /// An iPhone that walks out of Wi-Fi range or locks without saying goodbye leaves the connection half open:
+    /// reads would wait forever and the app would keep showing "connected" over a frozen picture.
+    /// Keep-alive probes make the read fail after about 12 seconds so the session is cleaned up and a new one can start.
+    /// </summary>
+    public static void EnableDeadPeerDetection(Socket socket)
+    {
+        try
+        {
+            socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, 6);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval, 2);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, 3);
+        }
+        catch (Exception e) when (e is SocketException or ObjectDisposedException or NotSupportedException or PlatformNotSupportedException) { }
     }
 
     private static async Task HoldOpenAsync(TcpClient client, CancellationToken ct)
@@ -723,6 +743,8 @@ public sealed class AirPlayReceiver : IDisposable
                 if (packet != null)
                 {
                     var current = active ?? variants[0].Decoder;
+                    if (current.Pictures == 12)
+                        Log?.Invoke("First pictures' NAL types: " + string.Join(" | ", current.FirstPictureNals) + $"; SPS/PPS known={current.HasParameterSets}");
                     if (packet.IsKeyFrame && current.KeyFrames == 1)
                         Log?.Invoke($"First key frame: {packet.Data.Length} bytes, {current.Width}x{current.Height}");
                     VideoPacket?.Invoke(packet);
@@ -730,6 +752,8 @@ public sealed class AirPlayReceiver : IDisposable
                 else if (type == 1 && (active ?? variants[0].Decoder).Width > 0)
                 {
                     var current = active ?? variants[0].Decoder;
+                    if (current.UnreadableConfigHex is { } hex && size > 0)
+                        Log?.Invoke($"Video config packet not understood ({size} bytes): {hex}");
                     Log?.Invoke($"Video format: {current.Width}x{current.Height} ({size} byte config)");
                 }
             }

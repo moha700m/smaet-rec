@@ -20,15 +20,17 @@ public sealed class Recorder : IDisposable
     private readonly int _videoStream, _audioStream = -1;
     private readonly BlockingCollection<(IMFSample sample, bool audio)> _queue = new(new ConcurrentQueue<(IMFSample, bool)>());
     private readonly Thread _thread;
-    private int _pendingVideo;
-    private long _videoFrames, _droppedFrames, _audioSamples;
+    private const int MaxPendingVideo = 8, MaxPendingAudio = 250; // 250 blocks is at least 2.5 s of sound
+    private int _pendingVideo, _pendingAudio;
+    private long _videoFrames, _droppedFrames, _audioSamples, _droppedAudio;
     private volatile string? _error;
-    private bool _finished;
+    private volatile bool _finished;
     private readonly object _finishGate = new();
 
     public long VideoFrames => Interlocked.Read(ref _videoFrames);
     public long DroppedFrames => Interlocked.Read(ref _droppedFrames);
     public long AudioSamplesWritten => Interlocked.Read(ref _audioSamples);
+    public long DroppedAudioBlocks => Interlocked.Read(ref _droppedAudio);
     public bool HasAudio => _audioStream >= 0;
     public string? Error => _error;
     public RecorderOptions Options => _options;
@@ -106,21 +108,41 @@ public sealed class Recorder : IDisposable
     public unsafe bool WriteVideo(IntPtr pixels, int pitch, long timeHns, long durationHns)
     {
         if (_finished || _error != null) return false;
-        if (Volatile.Read(ref _pendingVideo) >= 8) { Interlocked.Increment(ref _droppedFrames); return false; }
+        if (Volatile.Read(ref _pendingVideo) >= MaxPendingVideo) { Interlocked.Increment(ref _droppedFrames); return false; }
         int rowBytes = _options.Width * 4, total = rowBytes * _options.Height;
-        var buffer = MediaFactory.MFCreateMemoryBuffer(total);
-        buffer.Lock(out IntPtr dst, out _, out _);
-        if (pitch == rowBytes) Buffer.MemoryCopy((void*)pixels, (void*)dst, total, total);
-        else
-            for (int y = 0; y < _options.Height; y++)
-                Buffer.MemoryCopy((byte*)pixels + (long)y * pitch, (byte*)dst + (long)y * rowBytes, rowBytes, rowBytes);
-        buffer.Unlock();
-        buffer.CurrentLength = total;
-        var sample = MediaFactory.MFCreateSample();
-        sample.AddBuffer(buffer);
-        buffer.Dispose();
-        sample.SampleTime = timeHns;
-        sample.SampleDuration = durationHns;
+        IMFSample sample;
+        try
+        {
+            using var buffer = MediaFactory.MFCreateMemoryBuffer(total);
+            buffer.Lock(out IntPtr dst, out _, out _);
+            try
+            {
+                if (pitch == rowBytes) Buffer.MemoryCopy((void*)pixels, (void*)dst, total, total);
+                else
+                {
+                    int copy = Math.Min(rowBytes, Math.Abs(pitch));
+                    for (int y = 0; y < _options.Height; y++)
+                        Buffer.MemoryCopy((byte*)pixels + (long)y * pitch, (byte*)dst + (long)y * rowBytes, rowBytes, copy);
+                }
+            }
+            finally { buffer.Unlock(); }
+            buffer.CurrentLength = total;
+            sample = MediaFactory.MFCreateSample();
+            try
+            {
+                sample.AddBuffer(buffer);
+                sample.SampleTime = timeHns;
+                sample.SampleDuration = durationHns;
+            }
+            catch { sample.Dispose(); throw; }
+        }
+        catch (SharpGen.Runtime.SharpGenException e)
+        {
+            // Out of memory for a frame: lose this picture, keep the recording and the render thread alive.
+            Interlocked.Increment(ref _droppedFrames);
+            Log.Error("MP4 frame buffer", e);
+            return false;
+        }
         Interlocked.Increment(ref _pendingVideo);
         try { _queue.Add((sample, false)); }
         catch (InvalidOperationException)
@@ -137,19 +159,34 @@ public sealed class Recorder : IDisposable
     public void WriteAudio(short[] pcm, int sampleFrames, long startFrame)
     {
         if (_finished || _error != null || _audioStream < 0 || sampleFrames <= 0) return;
+        if (Volatile.Read(ref _pendingAudio) >= MaxPendingAudio) { Interlocked.Increment(ref _droppedAudio); return; } // encoder stalled: do not grow without limit
         int bytes = sampleFrames * AudioChannels * 2;
-        var buffer = MediaFactory.MFCreateMemoryBuffer(bytes);
-        buffer.Lock(out IntPtr dst, out _, out _);
-        System.Runtime.InteropServices.Marshal.Copy(pcm, 0, dst, sampleFrames * AudioChannels);
-        buffer.Unlock();
-        buffer.CurrentLength = bytes;
-        var sample = MediaFactory.MFCreateSample();
-        sample.AddBuffer(buffer);
-        buffer.Dispose();
-        sample.SampleTime = startFrame * 10_000_000L / AudioRate;
-        sample.SampleDuration = sampleFrames * 10_000_000L / AudioRate;
+        IMFSample sample;
+        try
+        {
+            using var buffer = MediaFactory.MFCreateMemoryBuffer(bytes);
+            buffer.Lock(out IntPtr dst, out _, out _);
+            try { System.Runtime.InteropServices.Marshal.Copy(pcm, 0, dst, sampleFrames * AudioChannels); }
+            finally { buffer.Unlock(); }
+            buffer.CurrentLength = bytes;
+            sample = MediaFactory.MFCreateSample();
+            try
+            {
+                sample.AddBuffer(buffer);
+                sample.SampleTime = startFrame * 10_000_000L / AudioRate;
+                sample.SampleDuration = sampleFrames * 10_000_000L / AudioRate;
+            }
+            catch { sample.Dispose(); throw; }
+        }
+        catch (SharpGen.Runtime.SharpGenException e)
+        {
+            Interlocked.Increment(ref _droppedAudio);
+            Log.Error("MP4 audio buffer", e);
+            return;
+        }
+        Interlocked.Increment(ref _pendingAudio);
         try { _queue.Add((sample, true)); }
-        catch (InvalidOperationException) { sample.Dispose(); }
+        catch (InvalidOperationException) { Interlocked.Decrement(ref _pendingAudio); sample.Dispose(); }
     }
 
     private void WriteLoop()
@@ -176,7 +213,7 @@ public sealed class Recorder : IDisposable
             }
             finally
             {
-                if (!audio) Interlocked.Decrement(ref _pendingVideo);
+                if (audio) Interlocked.Decrement(ref _pendingAudio); else Interlocked.Decrement(ref _pendingVideo);
                 sample.Dispose();
             }
         }

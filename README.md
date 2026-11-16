@@ -58,6 +58,16 @@
 
 **بخصوص التعريفات:** AirPlay عبر Wi‑Fi **لا يحتاج أي تعريفات iPhone**. تعريفات Apple مطلوبة فقط لطريقة USB عبر شبكة «نقطة الاتصال الشخصية»، وتُثبّت من تطبيق **Apple Devices** الرسمي في متجر مايكروسوفت (زر «تثبيت Apple Devices» في نافذة الربط). لا يمكن تضمين تعريفات Apple داخل التطبيق لأنها ملكية خاصة بـApple.
 
+### إصلاح 1.1.0 — صورة الآيفون التي لا تظهر أو تتشوّه، وUSB
+
+- **السبب الجذري لعدم ظهور الصورة/تشوّهها:** فكّ ترميز الفيديو كان يحرّر ذاكرة الإطار مرتين في كل استدعاء، فيفسد الذاكرة عشوائيًا (حزم تصل ولا صورة تخرج، أو صورة مكسّرة، أو انهيار). أُصلح، وأضيف اختبار يشغّل 60 جلسة متتالية.
+- فكّ الترميز يبدأ الآن من أول حزمة تحمل معلومات التهيئة (SPS) فعليًا، بدل الاعتماد على علامة قد تخطئ.
+- **USB كشبكة / نقطة اتصال:** قاعدة جدار الحماية صارت تشمل الشبكات «العامة» (ويندوز يصنّف شبكة كابل الآيفون ونقطة الاتصال كشبكة عامة فكان يحجبها).
+- **USB المباشر:** زر واحد (اتصال / إيقاف / إعادة المحاولة) بالعربية، إعادة اتصال تلقائية عند انقطاع الكابل (3 محاولات)، قياس FPS الفعلي، كشف توقف الصورة، ولا تبقى أي عملية خلفية بعد الإغلاق.
+- **3uTools:** إذا أُغلقت نافذة Realtime Screen ثم فُتحت تعود الصورة تلقائيًا؛ تنبيه عند تصغير النافذة أو ظهور صورة سوداء.
+- **الشريط العلوي** يعرض الآن ما يصل فعلًا: عدد الإطارات في الثانية، أو «الصورة متوقفة منذ … ث».
+- **التسجيل:** فحص مساحة القرص قبل التسجيل وأثناءه، وإيقاف آمن يحفظ ما سُجّل إذا امتلأ القرص.
+
 ### ربط الآيفون بالكابل (USB مباشر)
 
 1. ثبّت تطبيق **Apple Devices** من متجر مايكروسوفت أو iTunes المكتبي، ليكون دعم أجهزة Apple موجودًا على ويندوز.
@@ -132,6 +142,18 @@ Also:
 
 **USB cable:** install *Apple Devices* (Microsoft Store) or iTunes → plug in and tap *Trust* → turn on *Personal Hotspot* → Control Center → Screen Mirroring → **SMAET REC**. The picture then travels over the cable's network link instead of Wi-Fi. This is AirPlay over the wire, not a raw USB video capture: Windows has no supported driver for raw iPhone screen capture, and the unofficial route replaces Apple's driver and breaks syncing, so it is deliberately not used.
 
+### Fixed in 1.1.0 — iPhone picture missing or damaged, and USB
+
+- **Root cause of the missing/damaged picture:** the video decoder released each frame's memory twice per call, corrupting memory at random (packets arrive and no picture comes out, a broken picture, or a crash). Fixed, with a test that runs 60 decoder sessions in a row.
+- Decoding now starts on the first packet that really carries the stream setup (SPS) instead of trusting a flag.
+- **USB network / hotspot:** the firewall rule now covers "Public" networks (Windows files the iPhone's cable and hotspot networks as Public, so they were blocked).
+- **Direct USB:** one localized button (connect / stop / try again), automatic reconnect after a cable drop (3 attempts), real fps measurement, stalled-picture detection, and no helper process left behind.
+- **3uTools:** when the Realtime Screen window is closed and reopened the picture returns by itself; warnings for a minimised window or a black picture.
+- **Status bar** shows what is really arriving: frames per second, or "picture stopped for … s".
+- **Recording:** disk space is checked before and during recording; a full disk stops the recording cleanly and keeps what was recorded.
+
+Engineering review of comparable projects and the reasons for the chosen design: `docs/engineering-review.md`.
+
 ### Limitations and what has been tested
 
 Tested automatically on every build (GitHub Windows runner): drawing of the scene, real screen capture, 720p/30 and 1080p/60 recordings read back and checked (size, frame rate, orientation, duration), sound track writing, H.264 decoding, a full AirPlay session against a simulated iPhone (pairing, FairPlay, stream setup, and decryption of encrypted H.264 pictures), app start-up in Arabic and English, installer install/uninstall.
@@ -141,6 +163,10 @@ Tested automatically on every build (GitHub Windows runner): drawing of the scen
 - Receiving from a physical iPhone, over Wi-Fi or USB. The receiver follows the same protocol as other open-source AirPlay receivers, but it has not been confirmed against a real phone or against specific iOS versions.
 - Microphone and system-sound capture from real devices (the build machine has no sound hardware; the mixing and file-writing paths are tested with generated sound).
 - Hardware video encoders (NVIDIA / Intel / AMD) and 4K at 60 fps. Windows picks a hardware encoder automatically when one exists; otherwise the built-in software encoder is used.
+
+Also tested automatically since 1.1.0: capture of a live window (the mechanism used for 3uTools Realtime Screen) through preview, drawing and recording, including minimise, resize and close; the USB host's record stream (statuses, pictures, errors, truncated streams); black/stopped-picture detection; every drawing tool, undo/redo, effects, zoom, Record and Stop driven through the real button handlers with the resulting MP4 played back; portable package extraction and start; installer install → run → uninstall → reinstall.
+
+Still **not** tested on real hardware: a physical iPhone over AirPlay, direct USB or 3uTools; 3uTools itself.
 
 Known gaps: iPhone sound is not recorded; DRM-protected iPhone content appears black; touches on the iPhone are not transmitted by AirPlay, so the touch ripple is placed by clicking on the preview.
 

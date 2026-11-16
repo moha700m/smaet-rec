@@ -37,9 +37,11 @@ Name: "{group}\SMAET REC"; Filename: "{app}\SmaetRec.exe"
 Name: "{autodesktop}\SMAET REC"; Filename: "{app}\SmaetRec.exe"; Tasks: desktopicon
 
 [Run]
-; Let the iPhone reach the app on home/work networks (AirPlay needs incoming connections and device discovery).
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""SMAET REC"" dir=in action=allow program=""{app}\SmaetRec.exe"" enable=yes profile=private,domain"; Flags: runhidden
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""SMAET REC mDNS"" dir=in action=allow program=""{app}\SmaetRec.exe"" protocol=UDP localport=5353 enable=yes profile=private,domain"; Flags: runhidden
+; Let the iPhone reach the app (AirPlay needs incoming connections and device discovery). The rule covers every
+; network profile on purpose: Windows files the iPhone's USB/hotspot network under "Public", where a rule limited to
+; private networks silently blocks the phone. The rule is limited to this program only.
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""SMAET REC"" dir=in action=allow program=""{app}\SmaetRec.exe"" enable=yes profile=any"; Flags: runhidden
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""SMAET REC mDNS"" dir=in action=allow program=""{app}\SmaetRec.exe"" protocol=UDP localport=5353 enable=yes profile=any"; Flags: runhidden
 Filename: "{app}\SmaetRec.exe"; Description: "{cm:LaunchProgram,SMAET REC}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]

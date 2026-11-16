@@ -257,14 +257,14 @@ public class EngineTests(ITestOutputHelper output)
             decoder.SizeChanged += (w, h) => size = (w, h);
             long t = 0;
             foreach (var unit in units) { decoder.Push(unit, t, isKeyFrame: ContainsNal(unit, 5)); t += 33_333; }
-            bool ok = WaitFor(() => decoder.FramesDecoded >= 20 || decoder.Error != null, 15000);
+            bool ok = WaitFor(() => decoder.PicturesDecoded >= 20 || decoder.Error != null, 15000);
             output.WriteLine($"decoded {decoder.FramesDecoded} of {units.Count}, size {decoder.Width}x{decoder.Height}, error: {decoder.Error}");
             Assert.True(decoder.Error == null, "decoder failed: " + decoder.Error);
             Assert.True(ok, "decoder produced too few pictures");
             Assert.Equal((320, 240), (decoder.Width, decoder.Height));
         }
         Assert.Equal((320, 240), size);
-        Assert.True(arrived >= 20);
+        Assert.True(arrived >= 1);
 
         // The last decoded picture should be the solid colour of the source (B=192 G=64 R=32).
         Assert.True(frames.TryCopyLatest(out var pixels, out int fw, out int fh));
@@ -275,6 +275,220 @@ public class EngineTests(ITestOutputHelper output)
         Assert.InRange(c.b, 192 - 14, 192 + 14);
         Assert.InRange(c.g, 64 - 14, 64 + 14);
         Assert.InRange(c.r, 32 - 14, 32 + 14);
+    }
+
+    private static List<byte[]> AccessUnits(string asset)
+    {
+        var stream = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Assets", asset));
+        var units = new List<byte[]>();
+        int start = 0;
+        for (int i = 4; i + 4 < stream.Length; i++)
+            if (stream[i] == 0 && stream[i + 1] == 0 && stream[i + 2] == 0 && stream[i + 3] == 1 && (stream[i + 4] & 0x1F) == 9)
+            { units.Add(stream[start..i]); start = i; }
+        units.Add(stream[start..]);
+        return units;
+    }
+
+    /// <summary>
+    /// The test clips have four solid quadrants (red, green / blue, yellow). Checks the colours and that the
+    /// borders between them are straight, which catches slanted, torn or colour-shifted decoding.
+    /// </summary>
+    private static string? CheckQuadrants(byte[] px, int w, int h)
+    {
+        int hw = w / 2 / 2 * 2, hh = h / 2 / 2 * 2;
+        (int b, int g, int r) red = (40, 40, 200), green = (40, 200, 40), blue = (200, 40, 40), yellow = (40, 200, 200);
+        string? Near(int x, int y, (int b, int g, int r) want, string what)
+        {
+            var c = Pixel(px, w, x, y);
+            bool ok = Math.Abs(c.b - want.b) <= 28 && Math.Abs(c.g - want.g) <= 28 && Math.Abs(c.r - want.r) <= 28;
+            return ok ? null : $"{what} at ({x},{y}) is b={c.b} g={c.g} r={c.r}, expected about b={want.b} g={want.g} r={want.r}";
+        }
+        foreach (double fy in new[] { 0.04, 0.2, 0.35, 0.46 })
+        {
+            int yTop = (int)(h * fy), yBottom = hh + (int)((h - hh) * (fy * 2));
+            if (yBottom >= h - 2) yBottom = h - 3;
+            foreach (var problem in new[]
+            {
+                Near(6, yTop, red, "top-left"), Near(hw - 8, yTop, red, "top-left near the middle"),
+                Near(hw + 8, yTop, green, "top-right near the middle"), Near(w - 7, yTop, green, "top-right"),
+                Near(6, yBottom, blue, "bottom-left"), Near(hw - 8, yBottom, blue, "bottom-left near the middle"),
+                Near(hw + 8, yBottom, yellow, "bottom-right near the middle"), Near(w - 7, yBottom, yellow, "bottom-right"),
+            })
+                if (problem != null) return problem;
+        }
+        return Near(w / 4, hh - 8, red, "top-left just above the middle") ?? Near(w / 4, hh + 8, blue, "bottom-left just below the middle");
+    }
+
+    [Theory]
+    [InlineData("quad-664x1440.h264", 664, 1440)]
+    [InlineData("quad-886x1920.h264", 886, 1920)]
+    [InlineData("quad-590x1278.h264", 590, 1278)]
+    [InlineData("quad-1170x2532.h264", 1170, 2532)]
+    [InlineData("quad-1440x664.h264", 1440, 664)]
+    public void Phone_sized_video_is_decoded_without_distortion(string asset, int width, int height)
+    {
+        var units = AccessUnits(asset);
+        var frames = new MemoryFrameSource();
+        using (var decoder = new H264Decoder(frames))
+        {
+            long t = 0;
+            foreach (var unit in units) { decoder.Push(unit, t, isKeyFrame: ContainsNal(unit, 5)); t += 33_333; }
+            // Pictures that are not shown because a newer one is already waiting do not count as decoded-and-shown,
+            // so wait for the stream to be consumed rather than for a frame count.
+            WaitFor(() => decoder.Error != null || decoder.PicturesDecoded >= units.Count - 1, 15000);
+            output.WriteLine($"decoded {decoder.FramesDecoded} of {units.Count}, size {decoder.Width}x{decoder.Height}, error: {decoder.Error}");
+            output.WriteLine(decoder.Describe());
+            Assert.True(decoder.Error == null, "decoder failed: " + decoder.Error);
+            Assert.True(decoder.FramesDecoded >= 1, "decoder produced no picture: " + decoder.Describe());
+        }
+        Assert.True(frames.TryCopyLatest(out var pixels, out int w, out int h));
+        SavePng($"decoded-{width}x{height}.png", pixels, w, h);
+        Assert.Equal((width, height), (w, h));
+        Assert.Null(CheckQuadrants(pixels, w, h));
+    }
+
+    [Fact]
+    public void A_long_run_of_moving_pictures_after_one_key_frame_stays_clean()
+    {
+        // Like an iPhone: one key frame, then only changes, two slices per picture. A white box crosses the picture;
+        // if any packet were lost or decoded out of order the box would be in the wrong place or leave a trail.
+        var units = AccessUnits("moving-886x1920.h264");
+        Assert.Equal(90, units.Count);
+        var frames = new MemoryFrameSource();
+        using var decoder = new H264Decoder(frames);
+        long t = 0;
+        foreach (var unit in units) { decoder.Push(unit, t, isKeyFrame: ContainsNal(unit, 5)); t += 16_666; } // all at once: the decoder starts behind
+        // The decoder keeps the newest picture until another packet arrives, so 89 of 90 come out; the box is then 8 px short of its last position.
+        bool done = WaitFor(() => decoder.Error != null || decoder.PicturesDecoded >= 89, 30000);
+        output.WriteLine(decoder.Describe());
+        Assert.True(decoder.Error == null, "decoder failed: " + decoder.Error);
+        Assert.True(done, "not every picture was decoded: " + decoder.Describe());
+        Assert.Equal(0, decoder.PacketsDropped);
+        Assert.True(WaitFor(() => frames.TryCopyLatest(out _, out int cw, out _) && cw == 886, 3000));
+        Thread.Sleep(100);
+        Assert.True(frames.TryCopyLatest(out var px, out int w, out int h));
+        SavePng("decoded-moving-last.png", px, w, h);
+        static bool Near((byte b, byte g, byte r) c, int b, int g, int r) => Math.Abs(c.b - b) <= 30 && Math.Abs(c.g - g) <= 30 && Math.Abs(c.r - r) <= 30;
+        Assert.True(Near(Pixel(px, w, 772, 480), 250, 250, 250), $"the box should end at about x=714..822, pixel there is {Pixel(px, w, 772, 480)}");
+        Assert.True(Near(Pixel(px, w, 700, 480), 40, 200, 40), $"left of the box should be green background, was {Pixel(px, w, 700, 480)}");
+        Assert.True(Near(Pixel(px, w, 845, 480), 40, 200, 40), $"right of the box should be green background, was {Pixel(px, w, 845, 480)}");
+        Assert.True(Near(Pixel(px, w, 60, 480), 40, 40, 200), $"where the box started should be clean red again (no trail), was {Pixel(px, w, 60, 480)}");
+        Assert.True(Near(Pixel(px, w, 300, 480), 40, 40, 200), $"the box's path should be clean red (no trail), was {Pixel(px, w, 300, 480)}");
+    }
+
+    /// <summary>Removes SPS/PPS from an access unit, leaving what an iPhone sends when its config travels separately.</summary>
+    private static byte[] WithoutParameterSets(byte[] unit)
+    {
+        var starts = new List<int>();
+        for (int i = 0; i + 4 < unit.Length; i++)
+            if (unit[i] == 0 && unit[i + 1] == 0 && unit[i + 2] == 0 && unit[i + 3] == 1) starts.Add(i);
+        using var ms = new MemoryStream();
+        for (int n = 0; n < starts.Count; n++)
+        {
+            int from = starts[n], to = n + 1 < starts.Count ? starts[n + 1] : unit.Length;
+            if ((unit[from + 4] & 0x1F) is 7 or 8) continue;
+            ms.Write(unit, from, to - from);
+        }
+        return ms.ToArray();
+    }
+
+    [Fact]
+    public void Decoder_start_is_decided_by_the_bytes_not_by_a_flag()
+    {
+        Assert.True(H264Decoder.StartsDecodable(new byte[] { 0, 0, 0, 1, 0x67, 1, 2, 0, 0, 0, 1, 0x68, 3, 0, 0, 0, 1, 0x65, 9 }));
+        Assert.True(H264Decoder.StartsDecodable(new byte[] { 0, 0, 0, 1, 0x09, 0xF0, 0, 0, 1, 0x27, 1, 2, 3, 4 }));   // AUD first, 3-byte start code
+        Assert.False(H264Decoder.StartsDecodable(new byte[] { 0, 0, 0, 1, 0x65, 1, 2, 3, 4, 5 }));                    // bare key frame
+        Assert.False(H264Decoder.StartsDecodable(new byte[] { 0, 0, 0, 1, 0x41, 0, 0, 0, 1, 0x67, 1, 2, 3 }));        // SPS after a slice does not help that slice
+        Assert.False(H264Decoder.StartsDecodable(new byte[] { 1, 2, 3 }));
+        Assert.False(H264Decoder.StartsDecodable(Array.Empty<byte>()));
+    }
+
+    [Fact]
+    public void A_key_frame_that_arrives_without_parameter_sets_does_not_block_the_picture_forever()
+    {
+        // Regression: on a real iPhone the receiver counted 1043 good pictures and showed none. The decoder had been
+        // "started" by a key frame it could not use and then swallowed every later picture.
+        var units = AccessUnits("quad-664x1440.h264");   // key frames at 0 and 6 (GOP 6), each with SPS/PPS
+        var frames = new MemoryFrameSource();
+        using var decoder = new H264Decoder(frames);
+        long t = 0;
+        for (int i = 0; i < units.Count; i++)
+        {
+            // The first key frame comes bare and is flagged as a key frame; the later one is complete but NOT flagged.
+            byte[] data = i < 6 ? WithoutParameterSets(units[i]) : units[i];
+            decoder.Push(data, t, isKeyFrame: i == 0);
+            t += 33_333;
+        }
+        bool shown = WaitFor(() => decoder.FramesDecoded >= 1 || decoder.Error != null, 15000);
+        output.WriteLine(decoder.Describe());
+        Assert.True(decoder.Error == null, "decoder failed: " + decoder.Error);
+        Assert.True(shown, "no picture was ever shown: " + decoder.Describe());
+        Assert.True(decoder.Started);
+        Assert.True(frames.TryCopyLatest(out var pixels, out int w, out int h));
+        SavePng("decoded-late-parameter-sets.png", pixels, w, h);
+        Assert.Equal((664, 1440), (w, h));
+        Assert.Null(CheckQuadrants(pixels, w, h));
+    }
+
+    [Fact]
+    public void Pictures_without_any_parameter_sets_are_counted_as_waiting_not_as_decoded()
+    {
+        var units = AccessUnits("quad-664x1440.h264").Select(WithoutParameterSets).ToList();
+        var frames = new MemoryFrameSource();
+        using var decoder = new H264Decoder(frames);
+        long t = 0;
+        foreach (var unit in units) { decoder.Push(unit, t, isKeyFrame: ContainsNal(unit, 5)); t += 33_333; }
+        Assert.True(WaitFor(() => decoder.PacketsWaitingForStart == units.Count, 5000), decoder.Describe());
+        Assert.False(decoder.Started);
+        Assert.Equal(0, decoder.FramesDecoded);
+        Assert.False(frames.TryCopyLatest(out _, out _, out _));
+    }
+
+    [Fact]
+    public void Many_decoder_sessions_in_a_row_all_produce_pictures()
+    {
+        // Regression: the decoder released its output sample twice on every call. That corrupts the native heap, which
+        // showed up only now and then - a session where packets went in and no picture came out, or a later crash.
+        // Sixty sessions make such a fault show itself.
+        var clips = new[] { "quad-590x1278.h264", "quad-664x1440.h264", "quad-1170x2532.h264", "quad-886x1920.h264" }
+            .Select(name => (name, units: AccessUnits(name))).ToArray();
+        for (int round = 0; round < 60; round++)
+        {
+            var (name, units) = clips[round % clips.Length];
+            var frames = new MemoryFrameSource();
+            using var decoder = new H264Decoder(frames);
+            long t = 0;
+            foreach (var unit in units) { decoder.Push(unit, t, isKeyFrame: ContainsNal(unit, 5)); t += 33_333; }
+            bool done = WaitFor(() => decoder.Error != null || decoder.PicturesDecoded >= units.Count - 1, 10000);
+            Assert.True(decoder.Error == null, $"round {round} ({name}) failed: {decoder.Error}");
+            Assert.True(done && decoder.FramesDecoded >= 1, $"round {round} ({name}) produced no picture: {decoder.Describe()}");
+        }
+    }
+
+    [Fact]
+    public void Rotating_the_phone_mid_stream_keeps_the_picture_right()
+    {
+        var frames = new MemoryFrameSource();
+        var sizes = new List<(int, int)>();
+        using var decoder = new H264Decoder(frames);
+        decoder.SizeChanged += (w, h) => { lock (sizes) sizes.Add((w, h)); };
+        long t = 0;
+        foreach (var (asset, w, h) in new[] { ("quad-664x1440.h264", 664, 1440), ("quad-1440x664.h264", 1440, 664), ("quad-664x1440.h264", 664, 1440) })
+        {
+            long before = decoder.FramesDecoded;
+            var units = AccessUnits(asset);
+            foreach (var unit in units) { decoder.Push(unit, t, isKeyFrame: ContainsNal(unit, 5)); t += 33_333; }
+            Assert.True(WaitFor(() => decoder.FramesDecoded > before || decoder.Error != null, 15000), $"stalled after switching to {w}x{h}: " + decoder.Describe());
+            Assert.True(decoder.Error == null, "decoder failed: " + decoder.Error);
+            Assert.True(WaitFor(() => frames.TryCopyLatest(out _, out int cw, out int ch) && (cw, ch) == (w, h), 5000), $"picture never became {w}x{h}");
+            Assert.True(frames.TryCopyLatest(out var pixels, out int fw, out int fh));
+            SavePng($"decoded-rotation-{sizes.Count}-{w}x{h}.png", pixels, fw, fh);
+            Assert.Null(CheckQuadrants(pixels, fw, fh));
+        }
+        output.WriteLine("sizes reported: " + string.Join(", ", sizes));
+        output.WriteLine(decoder.Describe());
+        // The decoder's placeholder size before the first picture is not interesting; the phone sizes must follow in order.
+        Assert.Equal(new[] { (664, 1440), (1440, 664), (664, 1440) }, sizes.Where(x => x != (1920, 1080)).ToArray());
     }
 
     private static bool ContainsNal(byte[] data, int type)

@@ -172,6 +172,49 @@ public class MirrorStreamTests
     }
 
     [Fact]
+    public void Key_frames_are_reported_as_such_even_before_parameter_sets_are_known()
+    {
+        var key = RandomNumberGenerator.GetBytes(16); var iv = RandomNumberGenerator.GetBytes(16);
+        using var sender = new AesCtrStream(key, iv);
+        using var decoder = new MirrorStreamDecoder(key, iv);
+        var idr = Avcc(new byte[] { 0x65, 1, 2, 3 });
+        sender.Process(idr);
+        var early = decoder.Handle(Header(idr.Length, 0), idr)!;
+        Assert.True(early.IsKeyFrame);                       // it is a key frame, whatever we know about the stream
+        Assert.False(decoder.HasParameterSets);
+        Assert.Equal(new byte[] { 0, 0, 0, 1, 0x65, 1, 2, 3 }, early.Data); // nothing to prepend yet
+
+        // The config arrives late; the very next picture, key frame or not, must carry SPS/PPS so a decoder can start.
+        byte[] config = { 1, 0x64, 0, 0x1f, 0xff, 0xe1, 0, 4, 0x67, 1, 2, 3, 1, 0, 2, 0x68, 9 };
+        Assert.Null(decoder.Handle(Header(config.Length, 1, 0, 600, 1300), config));
+        Assert.True(decoder.HasParameterSets);
+        var delta = Avcc(new byte[] { 0x41, 7 });
+        sender.Process(delta);
+        var next = decoder.Handle(Header(delta.Length, 0), delta)!;
+        Assert.False(next.IsKeyFrame);
+        Assert.Equal(new byte[] { 0, 0, 0, 1, 0x67, 1, 2, 3, 0, 0, 0, 1, 0x68, 9, 0, 0, 0, 1, 0x41, 7 }, next.Data);
+        Assert.Equal(new[] { "5", "1" }, decoder.FirstPictureNals);
+    }
+
+    [Fact]
+    public void Config_packet_with_extra_leading_bytes_is_still_understood_and_garbage_is_reported()
+    {
+        using var decoder = new MirrorStreamDecoder(new byte[16], new byte[16]);
+        byte[] record = { 1, 0x64, 0, 0x1f, 0xff, 0xe1, 0, 4, 0x67, 1, 2, 3, 1, 0, 2, 0x68, 9 };
+        byte[] prefixed = new byte[] { 0, 0, 0, 0x11, 9, 9 }.Concat(record).ToArray();
+        Assert.Null(decoder.Handle(Header(prefixed.Length, 1, 0, 600, 1300), prefixed));
+        Assert.True(decoder.HasParameterSets);
+        Assert.Null(decoder.UnreadableConfigHex);
+
+        using var other = new MirrorStreamDecoder(new byte[16], new byte[16]);
+        byte[] garbage = Enumerable.Range(0, 40).Select(i => (byte)(i * 3 + 2)).ToArray();
+        Assert.Null(other.Handle(Header(garbage.Length, 1, 0, 600, 1300), garbage));
+        Assert.False(other.HasParameterSets);
+        Assert.StartsWith("020508", other.UnreadableConfigHex);
+        Assert.NotNull(other.LastIssue);
+    }
+
+    [Fact]
     public void Unpaired_iphone_uses_the_fairplay_key_directly()
     {
         var fairplayKey = RandomNumberGenerator.GetBytes(16);
@@ -593,5 +636,22 @@ public class AdvertisingTests
         receiver.Stop();
         Assert.Equal(ReceiverState.Stopped, receiver.State);
         Assert.Equal(0, receiver.AnnouncedAdapters);
+    }
+}
+
+public class AirPlayConnectionTests
+{
+    [Fact]
+    public void Accepted_connections_probe_for_a_vanished_phone()
+    {
+        using var listener = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork, System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
+        listener.Bind(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 0));
+        listener.Listen(1);
+        using var phone = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork, System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
+        phone.Connect(listener.LocalEndPoint!);
+        using var accepted = listener.Accept();
+        SmaetRec.AirPlay.AirPlayReceiver.EnableDeadPeerDetection(accepted);
+        Assert.NotEqual(0, (int)accepted.GetSocketOption(System.Net.Sockets.SocketOptionLevel.Socket, System.Net.Sockets.SocketOptionName.KeepAlive)!);
+        Assert.Equal(6, (int)accepted.GetSocketOption(System.Net.Sockets.SocketOptionLevel.Tcp, System.Net.Sockets.SocketOptionName.TcpKeepAliveTime)!);
     }
 }

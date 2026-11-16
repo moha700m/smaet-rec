@@ -53,7 +53,7 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          $v = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}".TrimStart("v") } else { "1.0.0" }
+          $v = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}".TrimStart("v") } else { "1.1.0" }
           "value=$v" >> $env:GITHUB_OUTPUT
       - name: Build
         run: dotnet build SmaetRec.sln -c Release -p:Version=${{ steps.version.outputs.value }}
@@ -90,18 +90,266 @@ jobs:
           if (!(Test-Path $iscc)) { choco install innosetup -y --no-progress }
           & $iscc "/DAppVersion=${{ steps.version.outputs.value }}" installer\SmaetRec.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Installer smoke test (silent install, check files, uninstall)
+      - name: Portable package test (extract, check files, run, close)
         shell: pwsh
         run: |
-          $setup = Get-ChildItem publish\SmaetRec-Setup-*.exe | Select-Object -First 1
-          $p = Start-Process $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "installer exit code $($p.ExitCode)" }
-          $exe = "$env:ProgramFiles\SMAET REC\SmaetRec.exe"
-          if (!(Test-Path $exe)) { throw "installed program not found" }
-          Write-Host "Installed: $exe ($((Get-Item $exe).VersionInfo.ProductVersion))"
-          netsh advfirewall firewall show rule name="SMAET REC" | Select-Object -First 6
-          $u = Start-Process "$env:ProgramFiles\SMAET REC\unins000.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -Wait -PassThru
-          if ($u.ExitCode -ne 0) { throw "uninstaller exit code $($u.ExitCode)" }
+          $zip = Get-ChildItem publish\SmaetRec-*-win-x64.zip | Select-Object -First 1
+          $dest = Join-Path $env:RUNNER_TEMP "portable"
+          Expand-Archive $zip.FullName -DestinationPath $dest -Force
+          $root = Join-Path $dest "SmaetRec"
+          foreach ($f in "SmaetRec.exe","SmaetRec.dll","SmaetRec.Media.dll","SmaetRec.AirPlay.dll","SmaetRec.Core.dll","coreclr.dll","usb\iphone-usb-host.exe","usb\iPhoneMirror.Driver.exe","usb\LICENSE-GPL-3.0.txt","usb-host-source.zip","LICENSE","THIRD-PARTY-NOTICES.md","README.md") {
+            if (!(Test-Path (Join-Path $root $f))) { throw "portable package is missing $f" }
+          }
+          Write-Host "USB runtime files:"; Get-ChildItem (Join-Path $root "usb") | ForEach-Object { Write-Host "  $($_.Name)  $($_.Length)" }
+          Write-Host "USB runtime files:"; Get-ChildItem (Join-Path $root "usb") | ForEach-Object { Write-Host "  $($_.Name)  $($_.Length)" }
+          $p = Start-Process (Join-Path $root "SmaetRec.exe") -ArgumentList "--dev-simulated-source" -PassThru
+          Start-Sleep -Seconds 8
+          if ($p.HasExited) { throw "portable app exited early with code $($p.ExitCode)" }
+          $p.Refresh()
+          Write-Host "Portable app running: $([math]::Round($p.WorkingSet64/1MB)) MB, $($p.Threads.Count) threads"
+          $null = $p.CloseMainWindow()
+          if (!$p.WaitForExit(15000)) { $p.Kill(); throw "portable app did not close" }
+          $left = Get-Process iphone-usb-host -ErrorAction SilentlyContinue
+          if ($left) { throw "a USB host process was left behind" }
+      - name: Installer test (install, run, uninstall, reinstall)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $diagDir = Join-Path $env:SMAET_ARTIFACTS "installer-test"
+          New-Item -ItemType Directory -Path $diagDir -Force | Out-Null
+
+          $setupFiles = @(Get-ChildItem publish\SmaetRec-Setup-*.exe -ErrorAction Stop)
+          if ($setupFiles.Count -eq 0) { throw "Installer executable was not produced." }
+          $setup = $setupFiles | Select-Object -First 1
+          $exe = Join-Path $env:ProgramFiles "SMAET REC\SmaetRec.exe"
+          $installDir = Join-Path $env:ProgramFiles "SMAET REC"
+          $ruleNames = @("SMAET REC", "SMAET REC mDNS")
+
+          function Get-FirewallRuleSnapshot {
+            param([string[]]$Names)
+
+            if (Get-Command Get-NetFirewallRule -ErrorAction SilentlyContinue) {
+              try {
+                $rules = @()
+                foreach ($name in $Names) {
+                  $rules += @(Get-NetFirewallRule -DisplayName $name -ErrorAction Stop)
+                }
+                $present = @($rules | Select-Object -ExpandProperty DisplayName -Unique)
+                return [pscustomobject]@{
+                  Provider = "NetSecurity"
+                  PresentNames = [string[]]$present
+                  Rules = $rules
+                }
+              }
+              catch {
+                Write-Warning "NetSecurity query failed; using netsh fallback: $($_.Exception.Message)"
+              }
+            }
+
+            $present = @()
+            foreach ($name in $Names) {
+              $output = @(& netsh.exe advfirewall firewall show rule name="$name" 2>&1)
+              $exitCode = $LASTEXITCODE
+              $text = $output -join [Environment]::NewLine
+              if ($exitCode -eq 0 -and $text.IndexOf($name, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                $present += $name
+              }
+              elseif ($exitCode -eq 1) {
+                # netsh returns 1 when the named rule is absent; this is expected after uninstall.
+              }
+              else {
+                throw "netsh firewall query for '$name' failed with exit code $exitCode. Output: $text"
+              }
+            }
+
+            return [pscustomobject]@{
+              Provider = "netsh"
+              PresentNames = [string[]]$present
+              Rules = @()
+            }
+          }
+
+          function Write-DiagnosticState {
+            param([string]$Stage)
+
+            Write-Host "========== Installer diagnostics: $Stage =========="
+            Write-Host "Install directory exists: $(Test-Path -LiteralPath $installDir)"
+            if (Test-Path -LiteralPath $installDir) {
+              Get-ChildItem -LiteralPath $installDir -Force -ErrorAction SilentlyContinue |
+                Select-Object Name, Length, LastWriteTime |
+                Format-Table -AutoSize | Out-String | Write-Host
+            }
+
+            try {
+              $snapshot = Get-FirewallRuleSnapshot -Names $ruleNames
+              Write-Host "Firewall provider: $($snapshot.Provider)"
+              Write-Host "Firewall rules found: $(@($snapshot.PresentNames) -join ', ')"
+              if (@($snapshot.Rules).Count -gt 0) {
+                $snapshot.Rules |
+                  Select-Object DisplayName, Enabled, Direction, Action, Profile |
+                  Format-Table -AutoSize | Out-String | Write-Host
+                foreach ($rule in $snapshot.Rules) {
+                  Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $rule -ErrorAction SilentlyContinue |
+                    Select-Object Program |
+                    Format-Table -AutoSize | Out-String | Write-Host
+                }
+              }
+            }
+            catch {
+              Write-Host "Firewall diagnostic query failed: $($_.Exception.Message)"
+            }
+
+            $processes = @(Get-Process -Name SmaetRec, iphone-usb-host -ErrorAction SilentlyContinue)
+            if ($processes.Count -gt 0) {
+              $processes | Select-Object ProcessName, Id, Path |
+                Format-Table -AutoSize | Out-String | Write-Host
+            }
+            else {
+              Write-Host "No SMAET REC or iPhone USB host processes remain."
+            }
+
+            $pending = $null
+            try {
+              $sessionManagerKey = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey(
+                "SYSTEM\CurrentControlSet\Control\Session Manager")
+              if ($null -ne $sessionManagerKey) {
+                try {
+                  $pending = $sessionManagerKey.GetValue("PendingFileRenameOperations", $null)
+                }
+                finally {
+                  $sessionManagerKey.Dispose()
+                }
+              }
+            }
+            catch {
+              Write-Host "Pending file rename state unavailable: $($_.Exception.Message)"
+            }
+
+            if ($pending) {
+              Write-Host ("PendingFileRenameOperations:" + [Environment]::NewLine + ($pending -join [Environment]::NewLine))
+            }
+            else {
+              Write-Host "No PendingFileRenameOperations registry value is present."
+            }
+
+            Get-ChildItem -LiteralPath $diagDir -File -ErrorAction SilentlyContinue |
+              Select-Object Name, Length |
+              Format-Table -AutoSize | Out-String | Write-Host
+          }
+
+          try {
+            foreach ($round in 1,2) {
+              $installLog = Join-Path $diagDir "smaet-install-$round.log"
+              $installArgs = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$installLog")
+              $install = Start-Process -FilePath $setup.FullName -ArgumentList $installArgs -Wait -PassThru
+              if ($install.ExitCode -ne 0) { throw "Installer exit code $($install.ExitCode) (round $round). Log: $installLog" }
+
+              if (!(Test-Path -LiteralPath $exe)) { throw "Installed program not found (round $round)." }
+              $usbHost = Join-Path $installDir "usb\iphone-usb-host.exe"
+              if (!(Test-Path -LiteralPath $usbHost)) { throw "Installed USB host not found (round $round)." }
+              Write-Host "Round $($round): installed $exe ($((Get-Item -LiteralPath $exe).VersionInfo.ProductVersion))"
+
+              $installedRules = Get-FirewallRuleSnapshot -Names $ruleNames
+              $missingRules = @($ruleNames | Where-Object { $_ -notin @($installedRules.PresentNames) })
+              if ($missingRules.Count -gt 0) {
+                throw "Firewall rules missing after install (provider=$($installedRules.Provider)): $($missingRules -join ', ')"
+              }
+              if ($installedRules.Provider -eq "NetSecurity") {
+                $invalidRules = @($installedRules.Rules | Where-Object {
+                  $_.Enabled -ne "True" -or $_.Direction -ne "Inbound" -or $_.Action -ne "Allow"
+                })
+                if ($invalidRules.Count -gt 0) {
+                  throw "Installed firewall rules are not enabled inbound allow rules: $($invalidRules.DisplayName -join ', ')"
+                }
+              }
+
+              $app = Start-Process -FilePath $exe -ArgumentList @("--dev-simulated-source") -PassThru
+              try {
+                Start-Sleep -Seconds 8
+                $app.Refresh()
+                if ($app.HasExited) { throw "Installed app exited early with code $($app.ExitCode) (round $round)." }
+                Write-Host "Installed app running: PID $($app.Id), $([math]::Round($app.WorkingSet64/1MB)) MB"
+                $null = $app.CloseMainWindow()
+                if (!$app.WaitForExit(15000)) {
+                  Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
+                  throw "Installed app did not close (round $round)."
+                }
+              }
+              finally {
+                $app.Refresh()
+                if (!$app.HasExited) {
+                  Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
+                }
+              }
+
+              $left = @(Get-Process -Name iphone-usb-host -ErrorAction SilentlyContinue)
+              if ($left.Count -gt 0) {
+                throw "A USB host process was left behind after app shutdown: $($left.Id -join ', ')"
+              }
+
+              $uninstallLog = Join-Path $diagDir "smaet-uninstall-$round.log"
+              $uninstaller = Join-Path $installDir "unins000.exe"
+              if (!(Test-Path -LiteralPath $uninstaller)) { throw "Uninstaller not found: $uninstaller" }
+              $uninstallArgs = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/LOG=$uninstallLog")
+              $uninstall = Start-Process -FilePath $uninstaller -ArgumentList $uninstallArgs -Wait -PassThru
+              if ($uninstall.ExitCode -ne 0) {
+                throw "Uninstaller exit code $($uninstall.ExitCode) (round $round). Log: $uninstallLog"
+              }
+
+              # Uninstall cleanup may complete just after the uninstaller process exits.
+              $deadline = [DateTime]::UtcNow.AddSeconds(15)
+              do {
+                Start-Sleep -Milliseconds 500
+                $after = Get-FirewallRuleSnapshot -Names $ruleNames
+                $programStillExists = Test-Path -LiteralPath $exe
+                if (!$programStillExists -and @($after.PresentNames).Count -eq 0) { break }
+              } while ([DateTime]::UtcNow -lt $deadline)
+
+              if (Test-Path -LiteralPath $exe) {
+                throw "Program still present after uninstall (round $round)."
+              }
+              if (@($after.PresentNames).Count -gt 0) {
+                throw "Firewall rules remain after uninstall (provider=$($after.Provider)): $($after.PresentNames -join ', ')"
+              }
+              Write-Host "Round $($round): uninstall verified; both firewall rules are absent."
+            }
+          }
+          catch {
+            Write-Host "Installer verification failed: $($_.Exception.Message)"
+            try {
+              Write-DiagnosticState -Stage "Failure"
+            }
+            catch {
+              Write-Warning "Failure diagnostics could not be collected: $($_.Exception.Message)"
+            }
+            throw
+          }
+          finally {
+            try {
+              Write-DiagnosticState -Stage "Final"
+            }
+            catch {
+              Write-Warning "Final diagnostics could not be collected: $($_.Exception.Message)"
+            }
+          }
+
+          Write-Host "Installer install/run/uninstall/reinstall verification passed."
+          exit 0
+      - name: Upload installer test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-test-diagnostics
+          path: artifacts/installer-test/**
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Checksums
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem publish\SmaetRec-Setup-*.exe, publish\SmaetRec-*-win-x64.zip
+          $lines = $files | ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)  $($_.Length) bytes" }
+          $lines | Set-Content publish\SHA256SUMS.txt -Encoding utf8
+          $lines | ForEach-Object { Write-Host $_ }
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
@@ -112,6 +360,11 @@ jobs:
         with:
           name: SmaetRec-portable
           path: publish/SmaetRec-*-win-x64.zip
+      - name: Upload checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: SHA256SUMS
+          path: publish/SHA256SUMS.txt
       - name: Release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
@@ -119,3 +372,4 @@ jobs:
           files: |
             publish/SmaetRec-Setup-*.exe
             publish/SmaetRec-*-win-x64.zip
+            publish/SHA256SUMS.txt

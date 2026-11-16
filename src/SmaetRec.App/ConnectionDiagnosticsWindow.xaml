@@ -23,31 +23,31 @@
                     <StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
                             <Ellipse x:Name="AirPlayDot" Width="10" Height="10" Fill="{StaticResource AmberBrush}" VerticalAlignment="Center"/>
-                            <TextBlock x:Name="AirPlayText" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="AirPlayText" Text="{Binding [Checking], Source={x:Static core:Loc.Instance}}" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
                             <Ellipse x:Name="VideoDot" Width="10" Height="10" Fill="{StaticResource AmberBrush}" VerticalAlignment="Center"/>
-                            <TextBlock x:Name="VideoText" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="VideoText" Text="{Binding [Checking], Source={x:Static core:Loc.Instance}}" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
                             <Ellipse x:Name="NetworkDot" Width="10" Height="10" Fill="{StaticResource AmberBrush}" VerticalAlignment="Center"/>
-                            <TextBlock x:Name="NetworkText" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="NetworkText" Text="{Binding [Checking], Source={x:Static core:Loc.Instance}}" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
                             <Ellipse x:Name="FirewallDot" Width="10" Height="10" Fill="{StaticResource AmberBrush}" VerticalAlignment="Center"/>
-                            <TextBlock x:Name="FirewallText" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="FirewallText" Text="{Binding [Checking], Source={x:Static core:Loc.Instance}}" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal">
                             <Ellipse x:Name="DriverDot" Width="10" Height="10" Fill="{StaticResource AmberBrush}" VerticalAlignment="Center"/>
-                            <TextBlock x:Name="DriverText" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="DriverText" Text="{Binding [Checking], Source={x:Static core:Loc.Instance}}" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
                             <Ellipse x:Name="UsbMuxDot" Width="10" Height="10" Fill="{StaticResource AmberBrush}" VerticalAlignment="Center"/>
-                            <TextBlock x:Name="UsbMuxText" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="UsbMuxText" Text="{Binding [Checking], Source={x:Static core:Loc.Instance}}" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
                             <Ellipse x:Name="UsbCaptureFilterDot" Width="10" Height="10" Fill="{StaticResource AmberBrush}" VerticalAlignment="Center"/>
-                            <TextBlock x:Name="UsbCaptureFilterText" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="UsbCaptureFilterText" Text="{Binding [Checking], Source={x:Static core:Loc.Instance}}" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
                         </StackPanel>
                     </StackPanel>
                 </Border>
@@ -60,6 +60,7 @@
                     <Button Style="{StaticResource PlainButton}" Content="{Binding [DiagNetworkSettings], Source={x:Static core:Loc.Instance}}" Click="NetworkSettings_Click"/>
                     <Button Style="{StaticResource PlainButton}" Content="{Binding [DiagInstallDrivers], Source={x:Static core:Loc.Instance}}" Click="InstallDrivers_Click"/>
                     <Button Style="{StaticResource PlainButton}" Content="{Binding [DiagCopyLog], Source={x:Static core:Loc.Instance}}" Click="CopyLog_Click"/>
+                    <Button Style="{StaticResource PlainButton}" Content="{Binding [DiagSaveSample], Source={x:Static core:Loc.Instance}}" Click="SaveSample_Click"/>
                     <Button Style="{StaticResource PlainButton}" Content="{Binding [DiagCopyUsbReport], Source={x:Static core:Loc.Instance}}" Click="CopyUsbReport_Click"/>
                 </WrapPanel>
 

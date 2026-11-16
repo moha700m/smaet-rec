@@ -17,6 +17,7 @@ public sealed class AudioMixer : IDisposable
     private Thread? _pump;
     private volatile bool _stop;
     private long _written;
+    private float[] _micScratch = Array.Empty<float>(), _loopScratch = Array.Empty<float>(); // one per device: each device has its own callback thread
 
     public bool MicrophoneActive { get; private set; }
     public bool SystemAudioActive { get; private set; }
@@ -47,7 +48,8 @@ public sealed class AudioMixer : IDisposable
             {
                 _mic = new WasapiCapture();
                 var format = _mic.WaveFormat;
-                _mic.DataAvailable += (_, a) => OnData(a, format, _micLine);
+                _mic.DataAvailable += (_, a) => OnData(a, format, _micLine, ref _micScratch);
+                _mic.RecordingStopped += (_, a) => OnStopped(a, microphone: true);
                 _mic.StartRecording();
                 MicrophoneActive = true;
             }
@@ -63,7 +65,8 @@ public sealed class AudioMixer : IDisposable
             {
                 _loopback = new WasapiLoopbackCapture();
                 var format = _loopback.WaveFormat;
-                _loopback.DataAvailable += (_, a) => OnData(a, format, _loopLine);
+                _loopback.DataAvailable += (_, a) => OnData(a, format, _loopLine, ref _loopScratch);
+                _loopback.RecordingStopped += (_, a) => OnStopped(a, microphone: false);
                 _loopback.StartRecording();
                 SystemAudioActive = true;
             }
@@ -82,7 +85,17 @@ public sealed class AudioMixer : IDisposable
 
     private long NowFrame => _clock.ElapsedTicks * Recorder.AudioRate / Stopwatch.Frequency;
 
-    private void OnData(WaveInEventArgs args, WaveFormat format, AudioTimeline line)
+    /// <summary>A device that goes away mid-recording (unplugged microphone) ends its own track only; the file and the other track go on.</summary>
+    private void OnStopped(StoppedEventArgs args, bool microphone)
+    {
+        if (_stop) return;
+        string message = args.Exception?.Message ?? "device stopped";
+        Log.Write((microphone ? "Microphone" : "System audio") + " stopped during recording: " + message);
+        if (microphone) { MicrophoneActive = false; MicrophoneError = message; }
+        else { SystemAudioActive = false; SystemAudioError = message; }
+    }
+
+    private void OnData(WaveInEventArgs args, WaveFormat format, AudioTimeline line, ref float[] scratch)
     {
         if (_stop || args.BytesRecorded <= 0) return;
         try
@@ -91,9 +104,12 @@ public sealed class AudioMixer : IDisposable
             if (channels <= 0 || bytesPerSample <= 0) return;
             bool isFloat = format.Encoding == WaveFormatEncoding.IeeeFloat ||
                            (format is WaveFormatExtensible ext && ext.SubFormat == new Guid("00000003-0000-0010-8000-00aa00389b71"));
-            int frames = args.BytesRecorded / (channels * bytesPerSample);
-            var stereo = ConvertToStereo(args.Buffer, frames, channels, bytesPerSample, isFloat, new float[frames * 2]);
-            line.Append(stereo, format.SampleRate, NowFrame);
+            int frames = Math.Min(args.BytesRecorded, args.Buffer.Length) / (channels * bytesPerSample);
+            if (frames == 0) return;
+            // Reused between callbacks; Append copies into the timeline, and only the valid part is handed over.
+            if (scratch.Length < frames * 2) scratch = new float[frames * 2];
+            ConvertToStereo(args.Buffer, frames, channels, bytesPerSample, isFloat, scratch);
+            line.Append(scratch.AsSpan(0, frames * 2), format.SampleRate, NowFrame);
         }
         catch (Exception e) when (e is not OutOfMemoryException)
         {

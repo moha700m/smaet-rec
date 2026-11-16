@@ -97,9 +97,9 @@ public static class NetworkDiagnostics
             $ErrorActionPreference = 'SilentlyContinue'
             $exe = '{Escape(exe)}'
             netsh advfirewall firewall delete rule name="SMAET REC" | Out-Null
-            netsh advfirewall firewall add rule name="SMAET REC" dir=in action=allow program="$exe" enable=yes profile=private,domain | Out-Null
+            netsh advfirewall firewall add rule name="SMAET REC" dir=in action=allow program="$exe" enable=yes profile=any | Out-Null
             netsh advfirewall firewall delete rule name="SMAET REC mDNS" | Out-Null
-            netsh advfirewall firewall add rule name="SMAET REC mDNS" dir=in action=allow program="$exe" protocol=UDP localport=5353 enable=yes profile=private,domain | Out-Null
+            netsh advfirewall firewall add rule name="SMAET REC mDNS" dir=in action=allow program="$exe" protocol=UDP localport=5353 enable=yes profile=any | Out-Null
             """;
         if (makePrivate)
             script += $"\nSet-NetConnectionProfile -InterfaceAlias '{Escape(profile!.Alias!)}' -NetworkCategory Private -ErrorAction SilentlyContinue\n";

@@ -60,6 +60,7 @@ public class AppLaunchTests(ITestOutputHelper output)
     [InlineData("app-arabic-settings", "--dev-simulated-source --lang ar --dev-open settings")]
     [InlineData("app-arabic-diagnostics", "--dev-simulated-source --lang ar --dev-open diag")]
     [InlineData("app-english-screens", "--dev-simulated-source --lang en --dev-open screens")]
+    [InlineData("app-arabic-3utools-picker", "--dev-simulated-source --lang ar --dev-open 3u")]
     [InlineData("app-real-start", "--lang ar")]
     public void App_starts_and_shows_its_window(string name, string arguments)
     {
@@ -95,5 +96,63 @@ public class AppLaunchTests(ITestOutputHelper output)
         Assert.DoesNotContain("FATAL", added);
         Assert.DoesNotContain("ERROR Render", added);
         if (!arguments.Contains("simulated")) Assert.Contains("AirPlay receiver", added);
+    }
+
+    [SkippableFact]
+    public void Buttons_draw_change_effects_and_record_a_playable_video()
+    {
+        var exe = FindApp();
+        Skip.If(exe == null, "The application was not built next to the tests");
+        string report = Path.Combine(Artifacts, "ui-selftest.txt");
+        string folder = Path.Combine(Artifacts, "recordings-ui");
+        File.Delete(report);
+        // The app records into its configured folder; point it at the artifacts folder for this run only.
+        string settingsBackup = File.Exists(AppPaths.SettingsFile) ? File.ReadAllText(AppPaths.SettingsFile) : "";
+        JsonStore.Save(AppPaths.SettingsFile, new AppSettings { OutputFolder = folder, Quality = VideoQuality.Hd720, Fps = 30, Language = "ar" });
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo(exe!, $"--dev-simulated-source --dev-allow-self-capture --dev-selftest \"{report}\"") { UseShellExecute = false })!;
+            bool exited = process.WaitForExit(90000);
+            if (!exited) process.Kill(true);
+            Assert.True(exited, "the app did not finish its self-test and close by itself");
+            Assert.True(File.Exists(report), "no self-test report was written");
+        }
+        finally
+        {
+            if (settingsBackup.Length > 0) File.WriteAllText(AppPaths.SettingsFile, settingsBackup); else File.Delete(AppPaths.SettingsFile);
+        }
+        var values = File.ReadAllLines(report).Select(l => l.Split('=', 2)).ToDictionary(p => p[0], p => p.Length > 1 ? p[1] : "");
+        foreach (var kv in values) output.WriteLine($"{kv.Key} = {kv.Value}");
+
+        Assert.Equal("ok", values["result"]);
+        Assert.Equal("True", values["layerMoved"]);
+        Assert.Equal("Screen", values["layerSelected"]);
+        Assert.Equal("PictureInPicture", values["presetApplied"]);
+        Assert.Equal("True", values["drawBarVisible"]);
+        Assert.Equal("6", values["drawn"]);              // pen, highlighter, arrow, circle, rectangle, blur
+        Assert.Equal("5", values["afterErase"]);         // eraser removed the arrow
+        Assert.Equal("6", values["afterUndo"]);          // undo brought it back
+        Assert.Equal("6", values["afterUndoRedo"]);
+        Assert.Equal("True", values["spotlight"]);
+        Assert.Equal("True", values["effectsBarVisible"]);
+        Assert.Equal("True", values["shadowsOff"]);
+        Assert.Equal("2", values["background"]);
+        Assert.Equal("1.50", values["zoom"]);
+        Assert.Equal("True", values["recording"]);
+        Assert.Equal("True", values["stopEnabled"]);
+        Assert.Equal("True", values["recordDisabledWhileRecording"]);
+        Assert.Matches(@"^00:0[2-5]$", values["timerShown"]);
+        Assert.Equal("True", values["stopped"]);
+        Assert.Equal("True", values["recordEnabledAgain"]);
+        Assert.NotEqual("hidden", values["toast"]);
+
+        // The file the Record/Stop buttons produced really plays: read it back.
+        Assert.True(File.Exists(values["video"]), "the recorded file does not exist: " + values["video"]);
+        var info = Mp4Info.Read(values["video"]);
+        output.WriteLine($"video {info.Width}x{info.Height} {info.Fps:F1} fps, {info.VideoFrames} frames, {info.DurationSeconds:F2}s");
+        Assert.Equal((1280, 720), (info.Width, info.Height));
+        Assert.True(info.VideoFrames >= 60, "too few frames: " + info.VideoFrames);
+        Assert.InRange(info.DurationSeconds, 2.5, 5.5);
+        SavePng("ui-selftest-first-frame.png", info.FirstFrameBgra!, info.Width, info.Height);
     }
 }

@@ -318,7 +318,11 @@ int Run(const std::wstring& pipeName, const std::wstring& requestedSerial) {
                         currentSession, &info, nullptr, &capacity, 0, 0);
                     if (copyResult == static_cast<std::int32_t>(iPhoneMirror::Result::BufferTooSmall) &&
                         capacity > 0 && capacity <= kMaxFrameBytes) {
-                        std::vector<std::uint8_t> source(capacity);
+                        // Kept between frames: a fresh zero-filled 8 MB buffer per frame at 60 fps is pure overhead.
+                        static std::vector<std::uint8_t> source;
+                        static std::vector<std::uint8_t> packed;
+                        if (source.size() < capacity) source.resize(capacity);
+                        capacity = static_cast<std::uint32_t>(source.size());
                         info = {};
                         info.struct_size = sizeof(info);
                         info.api_version = iPhoneMirror::ApiVersion;
@@ -332,11 +336,16 @@ int Run(const std::wstring& pipeName, const std::wstring& requestedSerial) {
                             const std::uint32_t tightStride = info.width * 4u;
                             const std::uint64_t outputSize64 = static_cast<std::uint64_t>(tightStride) * info.height;
                             if (outputSize64 <= kMaxFrameBytes) {
-                                std::vector<std::uint8_t> packed(static_cast<std::size_t>(outputSize64));
-                                for (std::uint32_t y = 0; y < info.height; ++y)
-                                    std::memcpy(packed.data() + static_cast<std::size_t>(y) * tightStride,
-                                                source.data() + static_cast<std::size_t>(y) * info.stride,
-                                                tightStride);
+                                // Rows are repacked only when the engine pads them; otherwise the frame goes out as it is.
+                                const std::uint8_t* pixels = source.data();
+                                if (info.stride != tightStride) {
+                                    if (packed.size() < outputSize64) packed.resize(static_cast<std::size_t>(outputSize64));
+                                    for (std::uint32_t y = 0; y < info.height; ++y)
+                                        std::memcpy(packed.data() + static_cast<std::size_t>(y) * tightStride,
+                                                    source.data() + static_cast<std::size_t>(y) * info.stride,
+                                                    tightStride);
+                                    pixels = packed.data();
+                                }
                                 char header[512]{};
                                 const int n = std::snprintf(header, sizeof(header),
                                     "{\"type\":\"video\",\"pixelFormat\":\"bgra8\",\"width\":%u,\"height\":%u,\"stride\":%u,\"payloadBytes\":%llu,\"timestamp100ns\":%lld}",
@@ -345,7 +354,7 @@ int Run(const std::wstring& pipeName, const std::wstring& requestedSerial) {
                                     static_cast<long long>(info.timestamp_100ns));
                                 if (n <= 0 || static_cast<std::size_t>(n) >= sizeof(header) ||
                                     !SendRecord(std::string(header, static_cast<std::size_t>(n)),
-                                                packed.data(), static_cast<std::uint32_t>(outputSize64))) {
+                                                pixels, static_cast<std::uint32_t>(outputSize64))) {
                                     g_running.store(false);
                                     break;
                                 }

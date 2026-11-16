@@ -30,6 +30,11 @@ public partial class MainWindow : Window
     private RecordingStatus? _recording;
     private string? _toastPath;
     private ConnectPhoneWindow? _connectWindow;
+    private readonly DispatcherTimer _reattach = new() { Interval = TimeSpan.FromSeconds(1.5) };
+    private CaptureTarget? _lost3uTools;
+    private DateTime _reattachUntil;
+    private bool _blackHintShown;
+    private int _diskChecks;
 
     // Pointer interaction on the preview.
     private bool _down, _moved;
@@ -63,7 +68,15 @@ public partial class MainWindow : Window
             if (error != null) ShowToast(Loc.T("CaptureFailed", error), null, isError: true);
             RefreshStatus();
         });
-        Engine.RecordingFailed += error => Dispatcher.BeginInvoke(() => ShowToast(Loc.T("RecordFailed", error), null, isError: true));
+        Engine.ScreenHealthChanged += _ => Dispatcher.BeginInvoke(RefreshStatus);
+        Engine.ScreenSourceLost += target => Dispatcher.BeginInvoke(() => OnScreenSourceLost(target));
+        _reattach.Tick += (_, _) => TryReattach3uTools();
+        Engine.RecordingFailed += error => Dispatcher.BeginInvoke(async () =>
+        {
+            // A write error (most often a full disk) must not leave a recording that looks alive but saves nothing.
+            ShowToast(Loc.T("RecordFailed", error), null, isError: true);
+            await StopRecording();
+        });
         Engine.Error += error => Log.Write("Engine error: " + error);
         _studio.PhoneStateChanged += () => Dispatcher.BeginInvoke(RefreshStatus);
         Scene.Annotations.Changed += () => Dispatcher.BeginInvoke(RefreshHistoryButtons);
@@ -96,13 +109,109 @@ public partial class MainWindow : Window
         RefreshHistoryButtons();
         UpdateMouseWatcher();
 
+        if (App.ArgValue("--dev-selftest") is { } report) _ = RunSelfTestAsync(report);
         switch (App.ArgValue("--dev-open"))
         {
             case "connect": Phone_Click(this, new RoutedEventArgs()); break;
             case "settings": Dispatcher.BeginInvoke(() => Settings_Click(this, new RoutedEventArgs())); break;
             case "screens": Dispatcher.BeginInvoke(() => Screen_Click(this, new RoutedEventArgs())); break;
+            case "3u": Dispatcher.BeginInvoke(() => (new ThreeUToolsWindowPicker { Owner = this }).ShowDialog()); break;
             case "diag": Dispatcher.BeginInvoke(() => (new ConnectionDiagnosticsWindow(_studio) { Owner = this }).Show()); break;
         }
+    }
+
+    /// <summary>
+    /// Development check used by the automated Windows tests: drives the real handlers behind the buttons
+    /// (draw, undo/redo, effects, zoom, record, stop) and writes what happened to a small report file.
+    /// </summary>
+    private async Task RunSelfTestAsync(string reportPath)
+    {
+        var lines = new List<string>();
+        void Note(string key, object? value) => lines.Add($"{key}={value}");
+        try
+        {
+            await Task.Delay(2500);
+            var (w, h) = Preview.PixelSize;
+            var fit = Compositor.PreviewRect(w, h);
+            (int x, int y) At(double fx, double fy) => ((int)(fit.X + fit.Width * fx), (int)(fit.Y + fit.Height * fy));
+            void Drag((int x, int y) from, (int x, int y) to)
+            {
+                OnPointerDown(from.x, from.y);
+                for (int i = 1; i <= 8; i++) OnPointerMove(from.x + (to.x - from.x) * i / 8, from.y + (to.y - from.y) * i / 8);
+                OnPointerUp(to.x, to.y);
+            }
+
+            // Arrange: drag the screen layer, then put the layout back.
+            double before = Scene.Screen.CenterX;
+            var grab = At(Scene.Screen.CenterX / Scene.CanvasWidth, Scene.Screen.CenterY / Scene.CanvasHeight);
+            Drag(grab, (grab.x + 60, grab.y + 30));
+            Note("layerMoved", Math.Abs(Scene.Screen.CenterX - before) > 5);
+            Note("layerSelected", Engine.Selected);
+            Arrange_Click(BtnReset, new RoutedEventArgs());
+            Arrange_Click(BtnPip, new RoutedEventArgs());
+            Note("presetApplied", Scene.LastPreset);
+            Arrange_Click(BtnSide, new RoutedEventArgs());
+
+            // Draw: every drawing tool once, then eraser, undo, redo.
+            BtnDraw.IsChecked = true; Mode_Click(BtnDraw, new RoutedEventArgs());
+            Note("drawBarVisible", DrawBar.Visibility == Visibility.Visible);
+            int n = 0;
+            foreach (var tool in new[] { Tool.Pen, Tool.Highlighter, Tool.Arrow, Tool.Ellipse, Tool.Rectangle, Tool.Blur })
+            {
+                SetTool(tool);
+                Drag(At(0.10 + n * 0.08, 0.15), At(0.16 + n * 0.08, 0.30));
+                n++;
+            }
+            Note("drawn", Scene.Annotations.Count);
+            SetTool(Tool.Eraser);
+            var onArrow = At(0.10 + 2 * 0.08 + 0.03, 0.225);
+            OnPointerDown(onArrow.x, onArrow.y); OnPointerUp(onArrow.x, onArrow.y);
+            Note("afterErase", Scene.Annotations.Count);
+            History_Click(BtnUndo, new RoutedEventArgs());
+            Note("afterUndo", Scene.Annotations.Count);
+            History_Click(BtnUndo, new RoutedEventArgs());
+            History_Click(BtnRedo, new RoutedEventArgs());
+            Note("afterUndoRedo", Scene.Annotations.Count);
+            ToolSpotlight.IsChecked = true; Pointer_Click(ToolSpotlight, new RoutedEventArgs());
+            Note("spotlight", Engine.Spotlight);
+            ToolSpotlight.IsChecked = false; Pointer_Click(ToolSpotlight, new RoutedEventArgs());
+
+            // Effects: toggles, background, zoom.
+            BtnDraw.IsChecked = false; BtnEffects.IsChecked = true; Mode_Click(BtnEffects, new RoutedEventArgs());
+            Note("effectsBarVisible", EffectsBar.Visibility == Visibility.Visible);
+            FxShadows.IsChecked = false; Effect_Click(FxShadows, new RoutedEventArgs());
+            Note("shadowsOff", !Scene.Effects.Shadows);
+            ((System.Windows.Controls.RadioButton)BackgroundPanel.Children[2]).IsChecked = true;
+            Note("background", Scene.Effects.BackgroundIndex);
+            Zoom_Click(BtnZoomIn, new RoutedEventArgs());
+            await Task.Delay(900);
+            Note("zoom", Engine.Zoom.Current.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture));
+            Zoom_Click(BtnZoomReset, new RoutedEventArgs());
+
+            // Record through the same buttons a person presses.
+            Record_Click(BtnRecord, new RoutedEventArgs());
+            Note("recording", Engine.IsRecording);
+            Note("stopEnabled", BtnStop.IsEnabled);
+            Note("recordDisabledWhileRecording", !BtnRecord.IsEnabled);
+            await Task.Delay(3200);
+            Note("timerShown", RecPill.Visibility == Visibility.Visible ? RecTime.Text : "hidden");
+            string? path = _recording?.Path;
+            await StopRecording();
+            Note("stopped", !Engine.IsRecording);
+            Note("recordEnabledAgain", BtnRecord.IsEnabled);
+            Note("video", path);
+            Note("videoBytes", path != null && File.Exists(path) ? new FileInfo(path).Length : 0);
+            Note("toast", Toast.Visibility == Visibility.Visible ? ToastText.Text : "hidden");
+            Note("phoneStatus", PhoneStatus.Text);
+            Note("screenStatus", ScreenStatus.Text);
+            Note("result", "ok");
+        }
+        catch (Exception e)
+        {
+            Note("result", "exception: " + e);
+        }
+        try { File.WriteAllLines(reportPath, lines); } catch (IOException) { }
+        Close();
     }
 
     private async void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
@@ -137,9 +246,40 @@ public partial class MainWindow : Window
                 ReceiverState.Failed => (Loc.T("PhoneError"), (Brush)FindResource("RedBrush")),
                 _ => (Loc.T("PhoneOff"), (Brush)FindResource("SubtleBrush")),
             };
+        // The phone pill reports what is really arriving, not just that a session exists.
+        var usb = _studio.UsbState;
+        var phone = Engine.PhoneHealth;
+        if (usb == Studio.UsbPhase.Starting) (PhoneStatus.Text, PhoneDot.Fill) = (Loc.T("PhoneStarting"), (Brush)FindResource("AmberBrush"));
+        else if (usb == Studio.UsbPhase.Reconnecting) (PhoneStatus.Text, PhoneDot.Fill) = (Loc.T("PhoneReconnecting"), (Brush)FindResource("AmberBrush"));
+        else if (usb == Studio.UsbPhase.Failed && !connected) (PhoneStatus.Text, PhoneDot.Fill) = (Loc.T("PhoneUsbFailed"), (Brush)FindResource("RedBrush"));
+        else if (connected && phone.Active)
+        {
+            if (phone.QuietSeconds >= 8) (PhoneStatus.Text, PhoneDot.Fill) = (Loc.T("PhoneStalled", (int)phone.QuietSeconds), (Brush)FindResource("AmberBrush"));
+            else PhoneStatus.Text = Loc.T("PhoneFps", phone.Fps.ToString("0"));
+        }
+
         bool screen = Engine.ScreenActive;
-        ScreenStatus.Text = Loc.T(screen ? "ScreenOn" : "ScreenOff");
-        ScreenDot.Fill = (Brush)FindResource(screen ? "GreenBrush" : "SubtleBrush");
+        var health = Engine.ScreenHealth;
+        string screenText = Loc.T(screen ? "ScreenOn" : "ScreenOff");
+        string screenBrush = screen ? "GreenBrush" : "SubtleBrush";
+        if (screen && health.Active)
+        {
+            if (health.Minimized) (screenText, screenBrush) = (Loc.T("ScreenMinimized"), "AmberBrush");
+            else if (health.Black == true) (screenText, screenBrush) = (Loc.T("ScreenBlack"), "AmberBrush");
+            else if (health.QuietSeconds >= 10) screenText = Loc.T("ScreenStill", (int)health.QuietSeconds);
+            else screenText = Loc.T("ScreenFps", health.Fps.ToString("0"));
+            ScreenStatus.ToolTip = $"{health.Width} × {health.Height} · {health.Method}";
+
+            if (health.Black == true && !health.Minimized && Engine.ScreenTarget is { IsLikely3uToolsWindow: true } && !_blackHintShown)
+            {
+                _blackHintShown = true;
+                ShowToast(Loc.T("ThreeUBlackHint"), null, isError: true);
+            }
+            else if (health.Black == false) _blackHintShown = false;
+        }
+        else ScreenStatus.ToolTip = null;
+        ScreenStatus.Text = screenText;
+        ScreenDot.Fill = (Brush)FindResource(screenBrush);
         lock (Scene.Sync)
         {
             BtnHidePhone.IsChecked = !Scene.Phone.Visible;
@@ -148,11 +288,37 @@ public partial class MainWindow : Window
         RefreshRecordingClock();
     }
 
+    private long? FreeBytesForRecording()
+    {
+        try
+        {
+            string folder = string.IsNullOrWhiteSpace(_studio.Settings.OutputFolder) ? AppPaths.DefaultVideoFolder : _studio.Settings.OutputFolder!;
+            string? root = Path.GetPathRoot(Path.GetFullPath(folder));
+            return string.IsNullOrEmpty(root) ? null : new DriveInfo(root).AvailableFreeSpace;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return null; }
+    }
+
+    /// <summary>While recording, look at the disk every few seconds: warn when it gets low, stop cleanly before it is full.</summary>
+    private async void WatchDiskWhileRecording()
+    {
+        if (++_diskChecks % 20 != 0) return;   // the clock ticks four times a second
+        long? free = FreeBytesForRecording();
+        if (free is < 120L * 1024 * 1024)
+        {
+            await StopRecording();
+            ShowToast(Loc.T("DiskStop"), _toastPath, isError: true);
+        }
+        else if (free is < 1024L * 1024 * 1024 && Toast.Visibility != Visibility.Visible)
+            ShowToast(Loc.T("LowDisk", (free.Value / (1024.0 * 1024 * 1024)).ToString("0.0")), null, isError: true);
+    }
+
     private void RefreshRecordingClock()
     {
         bool recording = Engine.IsRecording && _recording != null;
         RecPill.Visibility = recording ? Visibility.Visible : Visibility.Collapsed;
         if (!recording) return;
+        WatchDiskWhileRecording();
         var t = Engine.RecordingElapsed;
         RecTime.Text = t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss") : t.ToString(@"mm\:ss");
         RecDot.Opacity = t.Milliseconds < 500 ? 1 : 0.35;
@@ -515,6 +681,34 @@ public partial class MainWindow : Window
         Dispatcher.BeginInvoke(UpdateMouseWatcher, DispatcherPriority.Background);
     }
 
+    /// <summary>The window being shown went away by itself. For 3uTools, wait for its viewer to come back and attach it again.</summary>
+    private void OnScreenSourceLost(CaptureTarget target)
+    {
+        if (target.Kind != CaptureKind.Window) return;
+        if (target.IsLikely3uToolsWindow)
+        {
+            _lost3uTools = target;
+            _reattachUntil = DateTime.UtcNow.AddMinutes(5);
+            _reattach.Start();
+            ShowToast(Loc.T("ThreeULost"), null, isError: true);
+        }
+        else ShowToast(Loc.T("ScreenLost"), null, isError: true);
+    }
+
+    private void TryReattach3uTools()
+    {
+        if (_lost3uTools == null || Engine.ScreenActive || DateTime.UtcNow > _reattachUntil)
+        {
+            _reattach.Stop(); _lost3uTools = null;
+            return;
+        }
+        var candidate = CaptureTarget.Pick3uToolsReplacement(_lost3uTools, CaptureTarget.ThreeUToolsWindows());
+        if (candidate == null) return;
+        _reattach.Stop(); _lost3uTools = null;
+        ShowCapturedWindow(candidate, fullCanvas: false);
+        ShowToast(Loc.T("ThreeUBack"), null);
+    }
+
     /// <summary>
     /// Routes an externally selected window (including 3uTools Realtime Screen)
     /// into the same live scene, compositor, effects, and recorder as any other source.
@@ -584,6 +778,12 @@ public partial class MainWindow : Window
             return;
         }
         HideToast();
+        long? free = FreeBytesForRecording();
+        if (free is < 200L * 1024 * 1024)
+        {
+            ShowToast(Loc.T("NoDisk", free.Value / (1024 * 1024)), null, isError: true);
+            return;
+        }
         _recording = Engine.StartRecording(_studio.Settings, out var error);
         if (_recording == null)
         {

@@ -30,7 +30,13 @@ public sealed class Loc : INotifyPropertyChanged
     public static string T(string key) =>
         Table.TryGetValue(key, out var v) ? (Instance._language == "en" ? v.En : v.Ar) : key;
 
-    public static string T(string key, params object[] args) => string.Format(T(key), args);
+    public static string T(string key, params object[] args)
+    {
+        string text = T(key);
+        // A wrong placeholder count in one translation must show the plain text, not crash the window that asked for it.
+        try { return string.Format(text, args); }
+        catch (FormatException) { return text; }
+    }
 
     public static IReadOnlyDictionary<string, (string Ar, string En)> All => Table;
 
@@ -103,9 +109,9 @@ public sealed class Loc : INotifyPropertyChanged
         ["WifiStep3"] = ("اضغط على «انعكاس الشاشة»", "Tap “Screen Mirroring”"),
         ["WifiStep4"] = ("اختر «{0}»", "Choose “{0}”"),
         ["UsbStep1"] = ("وصّل الآيفون بالكمبيوتر بالكابل واضغط «وثوق» على الآيفون", "Plug the iPhone in with its cable and tap “Trust” on the iPhone"),
-        ["UsbStep2"] = ("يلزم تعريف Apple USB وناقل usbmux سليم للتعرّف على الآيفون؛ الفحص يختبر الرد الفعلي لا اسم الخدمة فقط", "The Apple USB driver and a working usbmux transport are required; diagnostics test a real protocol reply, not just a service name"),
-        ["UsbStep3"] = ("اترك الآيفون مفتوحًا واضغط «Connect USB» بالأسفل — لا تحتاج إلى انعكاس الشاشة أو نقطة الاتصال", "Keep the iPhone unlocked and press “Connect USB” below — Screen Mirroring and Personal Hotspot are not required"),
-        ["UsbNote"] = ("الاتصال المباشر يحتاج حزمة Apple USB وردًا صحيحًا من usbmux على المنفذ 27015، إضافة إلى مرشح التقاط خاص بهذا الآيفون. الفحص يوضح كل مكوّن على حدة. لعرض الآيفون بدون OBS اضغط «عرض الآيفون عبر 3uTools»، وافتح Toolbox ← Realtime Screen؛ ستظهر نافذته في القائمة المتجددة لاختيارها إلى معاينة SMAET REC.", "Direct USB requires the Apple USB package, a valid usbmux response on port 27015, and this iPhone's capture filter. Diagnostics report each component separately. To show the iPhone without OBS, press “iPhone screen via 3uTools” and open Toolbox → Realtime Screen; its window appears in the live-updating list for selection into the SMAET REC preview."),
+        ["UsbStep2"] = ("افتح قفل الآيفون وأبقِ شاشته مضاءة", "Unlock the iPhone and keep its screen on"),
+        ["UsbStep3"] = ("اضغط «اتصال USB» بالأسفل", "Press “Connect USB” below"),
+        ["UsbNote"] = ("إن لم يبدأ USB المباشر، استخدم «عرض الآيفون عبر 3uTools»: نفس المعاينة والرسم والتسجيل.", "If direct USB does not start, use “iPhone screen via 3uTools”: same preview, drawing and recording."),
         ["UsbPhoneFound"] = ("تم العثور على آيفون موصول بالكابل", "An iPhone is plugged in"),
         ["UsbPhoneMissing"] = ("لا يوجد آيفون موصول بالكابل", "No iPhone is plugged in"),
         ["UsbDriverFound"] = ("حزمة تعريف Apple USB موجودة", "Apple USB driver package is installed"),
@@ -171,6 +177,45 @@ public sealed class Loc : INotifyPropertyChanged
         ["DiagVideoLine"] = ("الفيديو: {0} حزمة · {1} صورة · {2} إطار مفكوك · {3} تالفة", "Video: {0} packets · {1} pictures · {2} frames decoded · {3} invalid"),
         ["DiagVideoCodec"] = ("الفيديو: الآيفون يرسل HEVC (H.265) وهذا الإصدار يفك H.264 فقط.", "Video: the iPhone is sending HEVC (H.265); this build decodes H.264 only."),
         ["DiagCopyLog"] = ("نسخ السجل", "Copy log"),
+        // live source health
+        ["ScreenFps"] = ("الشاشة ظاهرة · {0} إطار/ث", "Screen showing · {0} fps"),
+        ["ScreenStill"] = ("الشاشة ظاهرة · لا تغيّر منذ {0} ث", "Screen showing · no change for {0} s"),
+        ["ScreenMinimized"] = ("النافذة مصغّرة — أعد إظهارها لتعود الصورة", "The window is minimised — restore it to get the picture back"),
+        ["ScreenBlack"] = ("المصدر يعرض صورة سوداء", "The source is showing a black picture"),
+        ["ScreenLost"] = ("أُغلقت النافذة المعروضة", "The window being shown was closed"),
+        ["ThreeULost"] = ("أُغلقت نافذة 3uTools. افتح Toolbox ← Realtime Screen وستعود الصورة تلقائيًا.", "The 3uTools window was closed. Open Toolbox → Realtime Screen and the picture comes back by itself."),
+        ["ThreeUBack"] = ("عادت نافذة 3uTools وتم ربطها من جديد", "The 3uTools window is back and was attached again"),
+        ["ThreeUBlackHint"] = ("نافذة 3uTools سوداء: تأكد أن الآيفون مفتوح وأن Realtime Screen يعرض الشاشة.", "The 3uTools window is black: make sure the iPhone is unlocked and Realtime Screen is showing it."),
+        ["PhoneFps"] = ("الآيفون متصل · {0} إطار/ث", "iPhone connected · {0} fps"),
+        ["PhoneStalled"] = ("الآيفون متصل · الصورة متوقفة منذ {0} ث", "iPhone connected · picture stopped for {0} s"),
+        ["PhoneStarting"] = ("جارٍ بدء USB…", "Starting USB…"),
+        ["PhoneReconnecting"] = ("انقطع USB — جارٍ إعادة الاتصال…", "USB dropped — reconnecting…"),
+        ["PhoneUsbFailed"] = ("تعذّر اتصال USB", "USB connection failed"),
+        // USB button
+        ["Checking"] = ("جارٍ الفحص…", "Checking…"),
+        ["UsbDetails"] = ("تفاصيل الفحص والإصلاح", "Check details and repair"),
+        ["UsbDriverRepair"] = ("إعداد / إصلاح تعريف USB", "USB driver setup / repair"),
+        ["UsbReady"] = ("الآيفون جاهز — اضغط «اتصال USB»", "iPhone is ready — press “Connect USB”"),
+        ["UsbLive"] = ("صورة الآيفون تصل عبر USB · {0} إطار/ث", "iPhone picture is arriving over USB · {0} fps"),
+        ["UsbConnect"] = ("اتصال USB", "Connect USB"),
+        ["UsbConnecting"] = ("جارٍ الاتصال…", "Connecting…"),
+        ["UsbStop"] = ("إيقاف USB ({0} إطار/ث)", "Stop USB ({0} fps)"),
+        ["UsbRetry"] = ("إعادة المحاولة", "Try again"),
+        ["UsbPlugFirst"] = ("وصّل الآيفون وافتح قفله ثم أعد المحاولة.", "Plug in and unlock your iPhone, then try again."),
+        ["UsbFailedTitle"] = ("اتصال USB المباشر", "Direct USB capture"),
+        ["UsbFailedBody"] = ("لم يبدأ عرض الآيفون عبر USB.\n\nالمرحلة التي توقف عندها:\n{0}\n\nجرّب: افتح قفل الآيفون واضغط «وثوق»، افصل الكابل وأعد توصيله، ثم «إعادة المحاولة». يمكنك أيضًا استخدام «شاشة الآيفون عبر 3uTools».", "The iPhone picture did not start over USB.\n\nWhere it stopped:\n{0}\n\nTry: unlock the iPhone and tap “Trust”, unplug and replug the cable, then “Try again”. You can also use “iPhone screen via 3uTools”."),
+        ["UsbDriverToolMissing"] = ("أداة إعداد تعريف USB غير موجودة في هذه النسخة.", "The USB driver setup tool is not included in this build."),
+        // decoder state in diagnostics
+        ["DiagVideoNoSps"] = ("الصور تصل لكن لم تصل معلومات تهيئة الفيديو (SPS/PPS) من الآيفون، فلا يمكن عرضها. اضغط «نسخ السجل» وأرسله.", "Pictures are arriving but the iPhone's video setup data (SPS/PPS) never came, so they cannot be shown. Press “Copy log” and send it."),
+        ["DiagVideoWaitingStart"] = ("فكّ الترميز لم يبدأ بعد: {0} حزمة بانتظار صورة تحمل SPS.", "Decoding has not started: {0} packets waiting for a picture that carries SPS."),
+        ["DiagVideoDecoderError"] = ("خطأ في فكّ الترميز: {0}", "Decoder error: {0}"),
+        ["LowDisk"] = ("المساحة المتبقية على القرص قليلة ({0} ج.ب). قد يتوقف التسجيل.", "Little disk space is left ({0} GB). Recording may stop."),
+        ["NoDisk"] = ("لا توجد مساحة كافية على القرص لبدء التسجيل ({0} م.ب متاحة).", "Not enough disk space to start recording ({0} MB free)."),
+        ["DiskStop"] = ("توقف التسجيل لأن القرص امتلأ. تم حفظ ما سُجّل.", "Recording stopped because the disk is full. What was recorded has been saved."),
+        ["DiagSaveSample"] = ("حفظ عيّنة للتشخيص", "Save diagnostic sample"),
+        ["DiagSampleSaved"] = ("تم الحفظ. أرسل هذا المجلد إذا كانت صورة الآيفون غير سليمة: {0}", "Saved. Send this folder if the iPhone picture looks wrong: {0}"),
+        ["DiagSampleNone"] = ("لا يوجد فيديو من الآيفون بعد. اربط الآيفون أولًا ثم أعد المحاولة.", "No iPhone video yet. Connect the iPhone first, then try again."),
+        ["DiagTooSlow"] = ("الكمبيوتر لا يلحق على فيديو الآيفون ({0} حزمة مفقودة) — قد تتشوّه الصورة.", "This computer cannot keep up with the iPhone video ({0} packets lost) — the picture may be damaged."),
         ["DiagCopied"] = ("تم نسخ سجل AirPlay.", "AirPlay log copied."),
         ["DiagCopyFailed"] = ("تعذّر النسخ إلى الحافظة.", "Could not copy to the clipboard."),
         ["Unknown"] = ("خطأ غير معروف", "unknown error"),

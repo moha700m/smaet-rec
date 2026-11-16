@@ -36,6 +36,13 @@ public sealed class MirrorStreamDecoder : IDisposable
     /// <summary>True when the iPhone started sending HEVC, which this receiver does not decode.</summary>
     public bool UnsupportedCodec { get; private set; }
     public string? LastIssue { get; private set; }
+    /// <summary>True once SPS/PPS were found. Without them no decoder can start, however many pictures arrive.</summary>
+    public bool HasParameterSets => _parameterSets != null;
+    /// <summary>NAL unit types of the first pictures of the session ("7,8,5" = SPS, PPS, key frame), for diagnosis.</summary>
+    public IReadOnlyList<string> FirstPictureNals => _firstNals;
+    private readonly List<string> _firstNals = new();
+    /// <summary>Start of the last config packet that could not be understood (hex), for diagnosis.</summary>
+    public string? UnreadableConfigHex { get; private set; }
 
     public MirrorStreamDecoder(byte[] streamKey, byte[] streamIv) => _cipher = new AesCtrStream(streamKey, streamIv);
 
@@ -85,7 +92,7 @@ public sealed class MirrorStreamDecoder : IDisposable
                 LastIssue = "The iPhone is sending HEVC (H.265); this build decodes H.264 only.";
                 return null;
             }
-            var sets = ParseAvcConfig(payload) ?? TryRawParameterSets(payload);
+            var sets = ParseAvcConfig(payload) ?? TryRawParameterSets(payload) ?? ScanForAvcConfig(payload);
             if (sets != null)
             {
                 _parameterSets = sets;
@@ -95,6 +102,7 @@ public sealed class MirrorStreamDecoder : IDisposable
             else
             {
                 LastIssue = "Could not read SPS/PPS from the video config packet.";
+                UnreadableConfigHex = Convert.ToHexString(payload.AsSpan(0, Math.Min(payload.Length, 96)));
             }
             return null;
         }
@@ -106,6 +114,7 @@ public sealed class MirrorStreamDecoder : IDisposable
 
         bool key = false;
         using var foundSets = new MemoryStream();
+        var nals = Pictures < 12 ? new List<int>() : null;
         int pos = 0;
         while (pos + 4 <= payload.Length)
         {
@@ -117,6 +126,7 @@ public sealed class MirrorStreamDecoder : IDisposable
                 return null;
             }
             int nal = payload[pos + 4] & 0x1F;
+            nals?.Add(nal);
             if (nal == 5) key = true;
             if (nal is 7 or 8)
             {
@@ -152,11 +162,12 @@ public sealed class MirrorStreamDecoder : IDisposable
             _parameterSetsPending = false;
         }
 
+        if (nals != null) lock (_firstNals) _firstNals.Add(string.Join(",", nals));
         Pictures++;
         if (key) KeyFrames++;
-        // A key frame without SPS/PPS cannot start the decoder; report it as a delta so the
-        // decoder keeps waiting for the next usable IDR instead of failing on it.
-        return new VideoPacket(data, key && _parameterSets != null, micros, Width, Height);
+        // IsKeyFrame describes the picture itself. Whether the decoder can start on it is decided
+        // by the decoder from the bytes (it looks for the SPS that is prepended above).
+        return new VideoPacket(data, key, micros, Width, Height);
     }
 
     private void ReadPictureSize(ReadOnlySpan<byte> header)
@@ -175,6 +186,22 @@ public sealed class MirrorStreamDecoder : IDisposable
     {
         if (payload.Length > 8 && payload[0] == 0 && payload[1] == 0 && payload[2] == 0 && payload[3] == 1)
             return payload.ToArray();
+        return null;
+    }
+
+    /// <summary>
+    /// Some senders put extra bytes in front of the avcC record. Look for a record start
+    /// (version 1, then a plausible "reserved + length size" byte and "reserved + SPS count" byte)
+    /// anywhere in the first part of the packet and accept it only if it parses to the end cleanly.
+    /// </summary>
+    private static byte[]? ScanForAvcConfig(ReadOnlySpan<byte> payload)
+    {
+        for (int i = 1; i + 8 <= payload.Length && i < 64; i++)
+        {
+            if (payload[i] != 1 || (payload[i + 4] & 0xFC) != 0xFC || (payload[i + 5] & 0xE0) != 0xE0) continue;
+            var sets = ParseAvcConfig(payload[i..]);
+            if (sets != null && sets.Length > 8 && (sets[4] & 0x1F) == 7) return sets;
+        }
         return null;
     }
 

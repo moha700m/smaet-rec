@@ -22,6 +22,19 @@ public interface IVideoSource : IDisposable
     bool IsSimulated { get; }
     /// <summary>False once the thing being shown is gone (window closed, monitor unplugged).</summary>
     bool IsAlive { get; }
+    /// <summary>Looks at a few spots of the current picture. True = all black, false = something visible, null = cannot tell.</summary>
+    bool? ProbeBlack(GraphicsDevice gd) => null;
+}
+
+internal static class BlackProbe
+{
+    /// <summary>Sample points as fractions of the picture: centre, thirds and near the corners.</summary>
+    public static readonly (double x, double y)[] Points =
+    {
+        (0.5, 0.5), (0.33, 0.33), (0.66, 0.33), (0.33, 0.66), (0.66, 0.66), (0.5, 0.2), (0.5, 0.8), (0.12, 0.5), (0.88, 0.5),
+    };
+
+    public static bool IsDark(byte b, byte g, byte r) => b < 12 && g < 12 && r < 12;
 }
 
 internal static class BitmapFormats
@@ -147,9 +160,38 @@ public sealed class WgcScreenSource : IVideoSource
         return true;
     }
 
+    private ID3D11Texture2D? _probe;
+    private const int ProbeSize = 4;
+
+    public unsafe bool? ProbeBlack(GraphicsDevice gd)
+    {
+        if (_texture == null || Width < ProbeSize * 2 || Height < ProbeSize * 2) return null;
+        int count = BlackProbe.Points.Length;
+        _probe ??= gd.Device.CreateTexture2D(new Texture2DDescription(Format.B8G8R8A8_UNorm, (uint)(ProbeSize * count), ProbeSize, 1, 1,
+            BindFlags.None, ResourceUsage.Staging, CpuAccessFlags.Read));
+        for (int i = 0; i < count; i++)
+        {
+            int x = Math.Clamp((int)(BlackProbe.Points[i].x * Width), 0, Width - ProbeSize), y = Math.Clamp((int)(BlackProbe.Points[i].y * Height), 0, Height - ProbeSize);
+            gd.Context.CopySubresourceRegion(_probe, 0, (uint)(i * ProbeSize), 0, 0, _texture, 0, new Vortice.Mathematics.Box(x, y, 0, x + ProbeSize, y + ProbeSize, 1));
+        }
+        var map = gd.Context.Map(_probe, 0, MapMode.Read, Vortice.Direct3D11.MapFlags.None);
+        try
+        {
+            for (int row = 0; row < ProbeSize; row++)
+            {
+                byte* p = (byte*)map.DataPointer + row * (long)map.RowPitch;
+                for (int n = 0; n < ProbeSize * count; n++, p += 4)
+                    if (!BlackProbe.IsDark(p[0], p[1], p[2])) return false;
+            }
+            return true;
+        }
+        finally { gd.Context.Unmap(_probe, 0); }
+    }
+
     public void Dispose()
     {
         try { _session.Dispose(); _pool.Dispose(); } catch (Exception e) { Log.Write("Capture close: " + e.Message); }
+        _probe?.Dispose(); _probe = null;
         _bitmap?.Dispose(); _texture?.Dispose();
         _bitmap = null; _texture = null;
     }
@@ -212,6 +254,18 @@ public sealed class GdiScreenSource : IVideoSource
             _bitmap!.CopyFromMemory(_bits, (uint)(w * 4)).CheckError();
         }
         finally { ReleaseDC(IntPtr.Zero, screenDc); }
+        return true;
+    }
+
+    public unsafe bool? ProbeBlack(GraphicsDevice gd)
+    {
+        if (_bits == IntPtr.Zero || Width < 2 || Height < 2) return null;
+        foreach (var (fx, fy) in BlackProbe.Points)
+        {
+            int x = Math.Clamp((int)(fx * Width), 0, Width - 1), y = Math.Clamp((int)(fy * Height), 0, Height - 1);
+            byte* p = (byte*)_bits + ((long)y * Width + x) * 4;
+            if (!BlackProbe.IsDark(p[0], p[1], p[2])) return false;
+        }
         return true;
     }
 
@@ -303,6 +357,21 @@ public sealed class MemoryFrameSource : IVideoSource
                 _bitmap = gd.DC.CreateBitmap(new Vortice.Mathematics.SizeI(Width, Height), IntPtr.Zero, 0, BitmapFormats.Opaque);
             }
             _bitmap.CopyFromMemory(_pending, (uint)(Width * 4)).CheckError();
+            return true;
+        }
+    }
+
+    public bool? ProbeBlack(GraphicsDevice gd)
+    {
+        lock (_lock)
+        {
+            if (_pending == null || _pendingWidth < 2 || _pendingHeight < 2) return null;
+            foreach (var (fx, fy) in BlackProbe.Points)
+            {
+                int x = Math.Clamp((int)(fx * _pendingWidth), 0, _pendingWidth - 1), y = Math.Clamp((int)(fy * _pendingHeight), 0, _pendingHeight - 1);
+                int i = (y * _pendingWidth + x) * 4;
+                if (!BlackProbe.IsDark(_pending[i], _pending[i + 1], _pending[i + 2])) return false;
+            }
             return true;
         }
     }

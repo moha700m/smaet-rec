@@ -16,18 +16,43 @@ public sealed class H264Decoder : IDisposable
     private static readonly Guid LowLatency = new("9c27891a-ed7a-40e1-88e8-b22727a024ee");
     private static readonly Guid MinimumDisplayAperture = new("d7388766-18fe-48c6-a177-ee894867c8c4");
 
-    private readonly BlockingCollection<(byte[] data, long timestamp, bool key)> _queue = new(240);
+    private readonly BlockingCollection<(byte[] data, long timestamp, bool key)> _queue = new(900);
     private readonly Thread _thread;
     private readonly MemoryFrameSource _output;
     private volatile bool _disposed, _waitForKey = true;
     private IMFTransform? _transform;
     private int _codedWidth, _codedHeight, _width, _height, _stride;
     private long _decoded;
+    private long _inputs, _outputs, _notShown, _dropped, _formatChanges, _badLayout;
+    private double _decodeMs, _convertMs;
+    private int _lastBufferLength;
+    private long _lastShownTick;
+    private long _skippedBeforeStart;
+
+    /// <summary>Packets ignored so far because the stream's parameter sets (SPS) have not arrived.</summary>
+    public long PacketsWaitingForStart => _waitForKey ? Interlocked.Read(ref _skippedBeforeStart) : 0;
+    public bool Started => !_waitForKey;
 
     public int Width => _width;
     public int Height => _height;
+    /// <summary>Pictures turned into pixels and handed to the screen.</summary>
     public long FramesDecoded => Interlocked.Read(ref _decoded);
+    /// <summary>Pictures the Windows decoder produced, shown or not. It always holds the newest one back until the next packet arrives.</summary>
+    public long PicturesDecoded => Interlocked.Read(ref _outputs);
     public string? Error { get; private set; }
+    /// <summary>Packets thrown away because the computer could not keep up. Any non-zero value means the picture may be damaged until the phone sends a fresh key frame.</summary>
+    public long PacketsDropped => Interlocked.Read(ref _dropped);
+
+    /// <summary>One line with everything needed to judge the decoder from a log: counts, speed and the picture layout Windows reported.</summary>
+    public string Describe()
+    {
+        long outputs = Math.Max(1, Interlocked.Read(ref _outputs)), shown = Math.Max(1, FramesDecoded);
+        return $"started={!_waitForKey} skippedBeforeStart={Interlocked.Read(ref _skippedBeforeStart)} in={Interlocked.Read(ref _inputs)} out={Interlocked.Read(ref _outputs)} shown={FramesDecoded} notShown={Interlocked.Read(ref _notShown)} " +
+               $"dropped={PacketsDropped} badLayout={Interlocked.Read(ref _badLayout)} formatChanges={Interlocked.Read(ref _formatChanges)} queue={_queue.Count} " +
+               $"decode={_decodeMs / outputs:F1}ms convert={_convertMs / shown:F1}ms " +
+               $"coded={_codedWidth}x{_codedHeight} visible={_width}x{_height} stride={_stride} buffer={_lastBufferLength}";
+    }
+
     /// <summary>Raised (on the decoder thread) when the picture size becomes known or changes.</summary>
     public event Action<int, int>? SizeChanged;
 
@@ -41,16 +66,14 @@ public sealed class H264Decoder : IDisposable
     public void Push(byte[] annexB, long timestampMicros, bool isKeyFrame)
     {
         if (_disposed) return;
-        if (!_queue.TryAdd((annexB, timestampMicros, isKeyFrame)))
+        if (_queue.TryAdd((annexB, timestampMicros, isKeyFrame))) return;
+        // Hopelessly behind (about 15 seconds of video waiting). Every later picture builds on the
+        // ones before it, so a dropped packet damages the picture until the next key frame.
+        if (Interlocked.Increment(ref _dropped) == 1) Log.Write("H264 decoder cannot keep up; packets are being dropped. " + Describe());
+        if (isKeyFrame)
         {
-            // Behind. A key frame is a clean restart point; for a delta frame, drop the new
-            // picture and let the decoder finish the frames it already has. Clearing the whole
-            // queue here used to freeze the picture until the phone sent its next key frame.
-            if (isKeyFrame)
-            {
-                while (_queue.TryTake(out _)) { }
-                _queue.TryAdd((annexB, timestampMicros, isKeyFrame));
-            }
+            while (_queue.TryTake(out _)) { }
+            _queue.TryAdd((annexB, timestampMicros, isKeyFrame));
         }
     }
 
@@ -62,7 +85,21 @@ public sealed class H264Decoder : IDisposable
             CreateTransform();
             foreach (var (data, timestamp, key) in _queue.GetConsumingEnumerable())
             {
-                if (_waitForKey) { if (!key) continue; _waitForKey = false; }
+                if (_waitForKey)
+                {
+                    // The Windows decoder can only start on a packet that carries the stream's
+                    // parameter sets (SPS). Judge that from the bytes themselves: trusting a flag
+                    // from upstream once made the decoder "start" on a packet it could not use and
+                    // then swallow every later picture without ever producing one.
+                    if (!StartsDecodable(data))
+                    {
+                        if (Interlocked.Increment(ref _skippedBeforeStart) == 150)
+                            Log.Write("H264 decoder: 150 packets arrived but none carried SPS yet; still waiting.");
+                        continue;
+                    }
+                    _waitForKey = false;
+                    Log.Write($"H264 decoder starting after skipping {Interlocked.Read(ref _skippedBeforeStart)} packet(s).");
+                }
                 Decode(data, timestamp);
             }
         }
@@ -76,6 +113,22 @@ public sealed class H264Decoder : IDisposable
             _transform?.Dispose();
             _transform = null;
         }
+    }
+
+    /// <summary>True when the packet contains an SPS (NAL type 7) near its start, in Annex-B form.</summary>
+    public static bool StartsDecodable(ReadOnlySpan<byte> annexB)
+    {
+        int limit = Math.Min(annexB.Length - 4, 512);
+        for (int i = 0; i < limit; i++)
+        {
+            if (annexB[i] != 0 || annexB[i + 1] != 0) continue;
+            int nal = annexB[i + 2] == 1 ? i + 3 : annexB[i + 2] == 0 && annexB[i + 3] == 1 ? i + 4 : -1;
+            if (nal < 0 || nal >= annexB.Length) continue;
+            int type = annexB[nal] & 0x1F;
+            if (type == 7) return true;
+            if (type is 1 or 5) return false; // a picture slice came first: no parameter sets in front of it
+        }
+        return false;
     }
 
     private void CreateTransform()
@@ -117,6 +170,8 @@ public sealed class H264Decoder : IDisposable
             catch (SharpGen.Runtime.SharpGenException) { }
             _stride = (int)MediaFactory.MFGetAttributeUInt32(type, MediaTypeAttributeKeys.DefaultStride, (uint)_codedWidth);
             if (_stride <= 0) _stride = _codedWidth;
+            Interlocked.Increment(ref _formatChanges);
+            Log.Write($"H264 output format: coded {_codedWidth}x{_codedHeight}, visible {width}x{height}, stride {_stride}");
             if (width != _width || height != _height)
             {
                 _width = width; _height = height;
@@ -129,6 +184,8 @@ public sealed class H264Decoder : IDisposable
 
     private unsafe void Decode(byte[] data, long timestampMicros)
     {
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        Interlocked.Increment(ref _inputs);
         using (var buffer = MediaFactory.MFCreateMemoryBuffer(data.Length))
         using (var sample = MediaFactory.MFCreateSample())
         {
@@ -160,26 +217,48 @@ public sealed class H264Decoder : IDisposable
                 if (hr.Code == MediaFoundationRuntime.NeedMoreInput) return;
                 if (hr.Code == MediaFoundationRuntime.StreamChange) { SelectOutputType(); continue; }
                 hr.CheckError();
-                var result = output.Sample ?? ours;
+                // After the call the binding hands back a NEW wrapper in output.Sample, even when it is the very
+                // sample we passed in. Always work through our own wrapper in that case (see the finally block).
+                var result = ours ?? output.Sample;
                 if (result == null) return;
+                Interlocked.Increment(ref _outputs);
+                _decodeMs += System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                started = System.Diagnostics.Stopwatch.GetTimestamp();
+                // Every packet must be decoded (later pictures build on it), but turning a picture into
+                // pixels is only worth it for the one that will be seen. When packets are waiting, skip
+                // that step so the decoder catches up instead of falling behind and dropping packets.
+                bool show = _queue.Count == 0 || Environment.TickCount64 - _lastShownTick >= 50;
+                if (!show) { Interlocked.Increment(ref _notShown); continue; }
                 using var contiguous = result.ConvertToContiguousBuffer();
                 contiguous.Lock(out IntPtr src, out _, out int length);
                 try
                 {
+                    _lastBufferLength = length;
                     if (_width > 0 && _height > 0 && length >= _stride * _codedHeight * 3 / 2)
                     {
+                        long convertStart = System.Diagnostics.Stopwatch.GetTimestamp();
                         var frame = _output.Rent(_width * _height * 4);
                         fixed (byte* dst = frame)
                             PixelConvert.Nv12ToBgra((byte*)src, _stride, _width, _height, _codedHeight, dst, _width * 4);
                         _output.Submit(frame, _width, _height);
+                        _convertMs += System.Diagnostics.Stopwatch.GetElapsedTime(convertStart).TotalMilliseconds;
+                        _lastShownTick = Environment.TickCount64;
                         Interlocked.Increment(ref _decoded);
+                    }
+                    else if (Interlocked.Increment(ref _badLayout) == 1)
+                    {
+                        Log.Write("H264 picture skipped: buffer smaller than the reported layout. " + Describe());
                     }
                 }
                 finally { contiguous.Unlock(); }
             }
             finally
             {
-                if (output.Sample != null && !ReferenceEquals(output.Sample, ours)) output.Sample.Dispose();
+                // One COM reference must be released exactly once. output.Sample and `ours` are two wrappers around
+                // the same pointer when we supplied the sample; releasing through both frees it twice and corrupts
+                // the native heap (seen as: packets go in, no picture comes out, and later a crash).
+                var returned = output.Sample;
+                if (returned != null && (ours == null || returned.NativePointer != ours.NativePointer)) returned.Dispose();
                 output.Events?.Dispose();
                 ours?.Dispose();
             }
