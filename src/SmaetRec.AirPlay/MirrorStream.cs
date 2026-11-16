@@ -10,6 +10,12 @@ public sealed record VideoPacket(byte[] Data, bool IsKeyFrame, long TimestampMic
 /// Turns the AirPlay mirroring byte stream (128-byte headers + payloads) into decodable H.264 packets.
 /// Pure logic: no sockets, so it can be unit-tested.
 /// </summary>
+/// <remarks>
+/// The iPhone encrypts the picture stream as one continuous AES-128-CTR keystream that runs across
+/// packet boundaries. A packet is not padded to 16 bytes, so the unused tail of the last keystream
+/// block belongs to the first bytes of the next packet. Resetting the cipher per packet (a mistake
+/// this class used to make) decrypts everything after the first odd-length packet into garbage.
+/// </remarks>
 public sealed class MirrorStreamDecoder : IDisposable
 {
     public const int HeaderSize = 128;
@@ -17,14 +23,30 @@ public sealed class MirrorStreamDecoder : IDisposable
     private readonly AesCtrStream _cipher;
     private byte[]? _parameterSets;
     private bool _parameterSetsPending;
+
     public int Width { get; private set; }
     public int Height { get; private set; }
+    /// <summary>Headers handled, including SPS/PPS and statistics packets.</summary>
+    public long Packets { get; private set; }
+    /// <summary>Pictures handed to the decoder.</summary>
+    public long Pictures { get; private set; }
+    public long KeyFrames { get; private set; }
+    /// <summary>Pictures dropped because decryption produced an impossible NAL layout.</summary>
+    public long InvalidPackets { get; private set; }
+    /// <summary>True when the iPhone started sending HEVC, which this receiver does not decode.</summary>
+    public bool UnsupportedCodec { get; private set; }
+    public string? LastIssue { get; private set; }
 
     public MirrorStreamDecoder(byte[] streamKey, byte[] streamIv) => _cipher = new AesCtrStream(streamKey, streamIv);
 
     /// <summary>Derives the video stream key/iv exactly as the sender does.</summary>
-    public static MirrorStreamDecoder Create(byte[] fairPlayKeyMessage, byte[] encryptedKey, byte[]? ecdhShared, ulong streamConnectionId)
+    public static MirrorStreamDecoder Create(byte[]? fairPlayKeyMessage, byte[]? encryptedKey, byte[]? ecdhShared, ulong streamConnectionId)
     {
+        if (fairPlayKeyMessage is not { Length: >= 16 })
+            throw new InvalidOperationException("The iPhone never completed the FairPlay handshake (fp-setup).");
+        if (encryptedKey is not { Length: 72 })
+            throw new InvalidOperationException($"Unexpected ekey length {encryptedKey?.Length ?? 0}; expected 72 bytes.");
+
         var aesKey = new byte[16];
         new OmgHax().DecryptAesKey(fairPlayKeyMessage, encryptedKey, aesKey);
         return FromSessionKey(aesKey, ecdhShared, streamConnectionId);
@@ -43,48 +65,114 @@ public sealed class MirrorStreamDecoder : IDisposable
     }
 
     public static (int payloadSize, int payloadType) ParseHeader(ReadOnlySpan<byte> header) =>
-        (BinaryPrimitives.ReadInt32LittleEndian(header), BinaryPrimitives.ReadUInt16LittleEndian(header[4..]) & 0xFF);
+        (BinaryPrimitives.ReadInt32LittleEndian(header), header[4]);
 
     /// <summary>Handles one packet. Returns a video packet when the payload was a picture, otherwise null.</summary>
     public VideoPacket? Handle(ReadOnlySpan<byte> header, byte[] payload)
     {
         var (_, type) = ParseHeader(header);
+        Packets++;
+
         if (type == 1)
         {
-            int w = (int)BinaryPrimitives.ReadSingleLittleEndian(header[40..]);
-            int h = (int)BinaryPrimitives.ReadSingleLittleEndian(header[44..]);
-            if (w > 0 && h > 0) { Width = w; Height = h; }
-            var sets = ParseAvcConfig(payload);
-            if (sets != null) { _parameterSets = sets; _parameterSetsPending = true; }
+            ReadPictureSize(header);
+            if (payload.Length > 8 && payload[4] == (byte)'h' && payload[5] == (byte)'v')
+            {
+                UnsupportedCodec = true;
+                LastIssue = "The iPhone is sending HEVC (H.265); this build decodes H.264 only.";
+                return null;
+            }
+            var sets = ParseAvcConfig(payload) ?? TryRawParameterSets(payload);
+            if (sets != null)
+            {
+                _parameterSets = sets;
+                _parameterSetsPending = true;
+                LastIssue = null;
+            }
+            else
+            {
+                LastIssue = "Could not read SPS/PPS from the video config packet.";
+            }
             return null;
         }
-        if (type != 0) return null;
 
-        _cipher.AlignToBlock();
+        if (type != 0 || payload.Length == 0) return null;
+
+        // One continuous keystream for the whole session: do NOT restart it per packet.
         _cipher.Process(payload);
+
         bool key = false;
+        using var foundSets = new MemoryStream();
         int pos = 0;
         while (pos + 4 <= payload.Length)
         {
             int len = BinaryPrimitives.ReadInt32BigEndian(payload.AsSpan(pos));
-            if (len <= 0 || pos + 4 + len > payload.Length) return null; // not a valid picture (wrong key or damaged)
+            if (len <= 0 || len > payload.Length - pos - 4)
+            {
+                InvalidPackets++;
+                LastIssue = "Decryption produced an invalid NAL layout (key or counter mismatch).";
+                return null;
+            }
+            int nal = payload[pos + 4] & 0x1F;
+            if (nal == 5) key = true;
+            if (nal is 7 or 8)
+            {
+                foundSets.Write(StartCode);
+                foundSets.Write(payload, pos + 4, len);
+            }
             payload[pos] = 0; payload[pos + 1] = 0; payload[pos + 2] = 0; payload[pos + 3] = 1;
-            if ((payload[pos + 4] & 0x1F) == 5) key = true;
             pos += 4 + len;
         }
-        if (pos != payload.Length || _parameterSets == null) return null;
+        if (pos != payload.Length)
+        {
+            InvalidPackets++;
+            LastIssue = "Decryption produced an invalid NAL layout (key or counter mismatch).";
+            return null;
+        }
+
+        if (foundSets.Length > 0)
+        {
+            _parameterSets = foundSets.ToArray();
+            _parameterSetsPending = false;
+        }
 
         ulong ntp = BinaryPrimitives.ReadUInt64LittleEndian(header[8..]);
         long micros = (long)(ntp >> 32) * 1_000_000 + (long)((ntp & 0xFFFFFFFF) * 1_000_000 >> 32);
+
         byte[] data = payload;
-        if (key || _parameterSetsPending)
+        bool prepend = _parameterSets != null && (key || _parameterSetsPending);
+        if (prepend)
         {
-            data = new byte[_parameterSets.Length + payload.Length];
+            data = new byte[_parameterSets!.Length + payload.Length];
             _parameterSets.CopyTo(data, 0);
             payload.CopyTo(data, _parameterSets.Length);
             _parameterSetsPending = false;
         }
-        return new VideoPacket(data, key, micros, Width, Height);
+
+        Pictures++;
+        if (key) KeyFrames++;
+        // A key frame without SPS/PPS cannot start the decoder; report it as a delta so the
+        // decoder keeps waiting for the next usable IDR instead of failing on it.
+        return new VideoPacket(data, key && _parameterSets != null, micros, Width, Height);
+    }
+
+    private void ReadPictureSize(ReadOnlySpan<byte> header)
+    {
+        int w = (int)BinaryPrimitives.ReadSingleLittleEndian(header[40..]);
+        int h = (int)BinaryPrimitives.ReadSingleLittleEndian(header[44..]);
+        if (w <= 0 || h <= 0)
+        {
+            w = (int)BinaryPrimitives.ReadSingleLittleEndian(header[56..]);
+            h = (int)BinaryPrimitives.ReadSingleLittleEndian(header[60..]);
+        }
+        if (w > 0 && h > 0) { Width = w; Height = h; }
+    }
+
+    private static byte[]? TryRawParameterSets(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length > 8 && payload[0] == 0 && payload[1] == 0 && payload[2] == 0 && payload[3] == 1)
+            return payload.ToArray();
+        return null;
     }
 
     /// <summary>Converts an avcC configuration record into Annex-B SPS/PPS.</summary>

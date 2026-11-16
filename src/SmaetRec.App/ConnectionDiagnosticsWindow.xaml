@@ -26,6 +26,10 @@
                             <TextBlock x:Name="AirPlayText" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                            <Ellipse x:Name="VideoDot" Width="10" Height="10" Fill="{StaticResource AmberBrush}" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="VideoText" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
                             <Ellipse x:Name="NetworkDot" Width="10" Height="10" Fill="{StaticResource AmberBrush}" VerticalAlignment="Center"/>
                             <TextBlock x:Name="NetworkText" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
                         </StackPanel>
@@ -47,6 +51,7 @@
                     <Button x:Name="RepairButton" Style="{StaticResource AccentButton}" Content="{Binding [DiagRepair], Source={x:Static core:Loc.Instance}}" Click="Repair_Click"/>
                     <Button Style="{StaticResource PlainButton}" Content="{Binding [DiagNetworkSettings], Source={x:Static core:Loc.Instance}}" Click="NetworkSettings_Click"/>
                     <Button Style="{StaticResource PlainButton}" Content="{Binding [DiagInstallDrivers], Source={x:Static core:Loc.Instance}}" Click="InstallDrivers_Click"/>
+                    <Button Style="{StaticResource PlainButton}" Content="{Binding [DiagCopyLog], Source={x:Static core:Loc.Instance}}" Click="CopyLog_Click"/>
                 </WrapPanel>
 
                 <TextBlock x:Name="MessageText" Foreground="{StaticResource SubtleBrush}" FontSize="12.5" Margin="2,10,2,0" TextWrapping="Wrap"/>

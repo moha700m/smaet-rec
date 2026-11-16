@@ -30,9 +30,22 @@ public sealed class AirPlayReceiver : IDisposable
     private MdnsResponder? _mdns;
     private Session? _mirrorSession;
     private int _activeMirrorStreams;
+    private volatile MirrorStreamDecoder? _mirrorDecoder;
+    private string? _lastMirrorIssue;
 
     public string Name { get; private set; } = "SMAET REC";
     public string DeviceId { get; private set; } = "";
+    /// <summary>Name the iPhone reported during SETUP (for diagnostics).</summary>
+    public string? ClientName { get; private set; }
+    /// <summary>Hardware model the iPhone reported during SETUP, e.g. iPhone14,2.</summary>
+    public string? ClientModel { get; private set; }
+    public string? ClientVersion { get; private set; }
+    public long MirrorPackets => _mirrorDecoder?.Packets ?? 0;
+    public long MirrorPictures => _mirrorDecoder?.Pictures ?? 0;
+    public long MirrorKeyFrames => _mirrorDecoder?.KeyFrames ?? 0;
+    public long MirrorInvalid => _mirrorDecoder?.InvalidPackets ?? 0;
+    public bool MirrorCodecUnsupported => _mirrorDecoder?.UnsupportedCodec ?? false;
+    public string? MirrorIssue => _mirrorDecoder?.LastIssue ?? _lastMirrorIssue;
     public int ControlPort { get; private set; }
     public ReceiverState State { get; private set; } = ReceiverState.Stopped;
     public string? LastError { get; private set; }
@@ -198,7 +211,7 @@ public sealed class AirPlayReceiver : IDisposable
         return id;
     }
 
-    private void StartAdvertising()
+    private (MdnsService Raop, MdnsService Airplay) BuildServices()
     {
         string pk = Convert.ToHexString(_edPublic).ToLowerInvariant();
         string id = DeviceId.Replace(":", "");
@@ -213,6 +226,27 @@ public sealed class AirPlayReceiver : IDisposable
             ("deviceid", DeviceId), ("features", Features + ",0x0"), ("pw", "false"), ("flags", "0x4"), ("model", Model), ("pk", pk),
             ("pi", PairingId), ("srcvers", SourceVersion), ("vv", "2"),
         });
+        return (raop, airplay);
+    }
+
+    /// <summary>The TXT record bytes exactly as they appear in DNS-SD, for the /info "txtAirPlay" reply.</summary>
+    private static byte[] TxtData(MdnsService service)
+    {
+        using var ms = new MemoryStream();
+        foreach (var (key, value) in service.Text)
+        {
+            var bytes = Encoding.UTF8.GetBytes(key + "=" + value);
+            if (bytes.Length is 0 or > 255) continue;
+            ms.WriteByte((byte)bytes.Length);
+            ms.Write(bytes);
+        }
+        return ms.ToArray();
+    }
+
+    private void StartAdvertising()
+    {
+        string id = DeviceId.Replace(":", "");
+        var (raop, airplay) = BuildServices();
         _mdns = new MdnsResponder(new[] { raop, airplay }, "smaet-rec-" + id.ToLowerInvariant()[6..], m => Log?.Invoke(m));
         if (_mdns.AdapterCount == 0) Log?.Invoke("No network adapter to announce on yet; will keep looking");
     }
@@ -295,8 +329,17 @@ public sealed class AirPlayReceiver : IDisposable
         switch (req.Method)
         {
             case "GET" when path == "/info":
-                res.SetBody(BinaryPlist.Write(BuildInfo()), "application/x-apple-binary-plist");
+            {
+                // iOS first asks for the mDNS TXT record ("qualifier" = txtAirPlay) and expects it in
+                // the reply. RPiPlay includes it in every /info answer, which is harmless and makes
+                // the receiver look like a real Apple TV to older and newer iOS versions alike.
+                var info = BuildInfo();
+                var (raop, airplay) = BuildServices();
+                info["txtAirPlay"] = TxtData(airplay);
+                info["txtRAOP"] = TxtData(raop);
+                res.SetBody(BinaryPlist.Write(info), "application/x-apple-binary-plist");
                 break;
+            }
             case "POST" when path == "/pair-setup":
                 res.SetBody((byte[])_edPublic.Clone(), "application/octet-stream");
                 break;
@@ -349,6 +392,7 @@ public sealed class AirPlayReceiver : IDisposable
             },
         },
         ["features"] = FeaturesValue,
+        ["initialVolume"] = 0.0,
         ["keepAliveLowPower"] = true,
         ["keepAliveSendStatsAsBody"] = true,
         ["macAddress"] = DeviceId,
@@ -404,7 +448,8 @@ public sealed class AirPlayReceiver : IDisposable
             s.EcdhOurs.CopyTo(message, 32);
             s.PairVerified = Ed25519.Verify(signature, 0, s.EdTheirs, 0, message, 0, message.Length);
             Log?.Invoke("Pairing verified: " + s.PairVerified);
-            if (!s.PairVerified) { res.Status = 470; res.Reason = "Connection Authorization Required"; }
+            if (!s.PairVerified)
+                Log?.Invoke("pair-verify signature mismatch; keeping the session (the ECDH secret is still shared)");
         }
     }
 
@@ -420,13 +465,17 @@ public sealed class AirPlayReceiver : IDisposable
             if (mode > 3) throw new FormatException("Unsupported FairPlay mode");
             res.SetBody(FairPlayReplies.Get(mode), "application/octet-stream");
         }
-        else if (body.Length == 164)
+        else if (body.Length >= 32)
         {
+            // iOS sends 164 bytes on AirPlay 1; some iOS/AirPlay 2 builds send 168. The 20-byte
+            // suffix is echoed back after the 12-byte FPLY header, and the whole message is needed
+            // later to unwrap the 72-byte ekey.
             s.KeyMessage = (byte[])body.Clone();
             var output = new byte[32];
             FpHeader.CopyTo(output, 0);
-            Array.Copy(body, 144, output, 12, 20);
+            Array.Copy(body, body.Length - 20, output, 12, 20);
             res.SetBody(output, "application/octet-stream");
+            Log?.Invoke($"FairPlay handshake ({body.Length} bytes) received");
         }
         else throw new FormatException("Unexpected fp-setup length " + body.Length);
     }
@@ -436,10 +485,16 @@ public sealed class AirPlayReceiver : IDisposable
         if (BinaryPlist.Read(req.Body) is not Dictionary<string, object?> plist) throw new FormatException("SETUP without plist");
         var reply = new Dictionary<string, object>();
 
+        if (plist.TryGetValue("name", out var name) && name is string clientName) ClientName = clientName;
+        if (plist.TryGetValue("model", out var model) && model is string clientModel) ClientModel = clientModel;
+        if (plist.TryGetValue("osVersion", out var os) && os is string osVersion) ClientVersion = osVersion;
+        if (plist.TryGetValue("deviceID", out var dev) && dev is string deviceId)
+            Log?.Invoke($"SETUP from {deviceId} ({ClientModel ?? "?"}, {ClientName ?? "?"})");
+
         if (plist.TryGetValue("ekey", out var ekey) && ekey is byte[] key)
         {
             s.EncryptedKey = key;
-            int timingPort = plist.TryGetValue("timingPort", out var tp) && tp is long t ? (int)t : 0;
+            int timingPort = (int)ToUInt64(plist.GetValueOrDefault("timingPort"));
             var timing = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
             s.Udp.Add(timing);
             if (timingPort > 0 && s.Remote != null)
@@ -449,6 +504,7 @@ public sealed class AirPlayReceiver : IDisposable
             }
             reply["eventPort"] = ((IPEndPoint)_events!.LocalEndpoint).Port;
             reply["timingPort"] = ((IPEndPoint)timing.Client.LocalEndPoint!).Port;
+            Log?.Invoke($"SETUP audio keys: ekey={key.Length} bytes, timingPort={timingPort}");
         }
 
         if (plist.TryGetValue("streams", out var streamsObj) && streamsObj is List<object?> streams)
@@ -456,12 +512,15 @@ public sealed class AirPlayReceiver : IDisposable
             var replies = new List<object>();
             foreach (var item in streams)
             {
-                if (item is not Dictionary<string, object?> stream || stream.GetValueOrDefault("type") is not long type) continue;
+                if (item is not Dictionary<string, object?> stream) continue;
+                ulong type = ToUInt64(stream.GetValueOrDefault("type"));
                 if (type == 110)
                 {
-                    s.StreamConnectionId = unchecked((ulong)(long)stream["streamConnectionID"]!);
+                    s.StreamConnectionId = ToUInt64(stream.GetValueOrDefault("streamConnectionID"));
                     lock (_lock) _mirrorSession = s;
-                    replies.Add(new Dictionary<string, object> { ["type"] = 110, ["dataPort"] = ((IPEndPoint)_mirror!.LocalEndpoint).Port });
+                    int dataPort = ((IPEndPoint)_mirror!.LocalEndpoint).Port;
+                    replies.Add(new Dictionary<string, object> { ["type"] = 110, ["dataPort"] = dataPort });
+                    Log?.Invoke($"SETUP mirror stream: id={s.StreamConnectionId}, dataPort={dataPort}");
                 }
                 else if (type == 96)
                 {
@@ -475,12 +534,27 @@ public sealed class AirPlayReceiver : IDisposable
                         ["dataPort"] = ((IPEndPoint)data.Client.LocalEndPoint!).Port,
                         ["controlPort"] = ((IPEndPoint)control.Client.LocalEndPoint!).Port,
                     });
+                    Log?.Invoke("SETUP audio stream accepted");
+                }
+                else
+                {
+                    Log?.Invoke($"SETUP with unsupported stream type {type}; ignored");
                 }
             }
             reply["streams"] = replies;
         }
         res.SetBody(BinaryPlist.Write(reply), "application/x-apple-binary-plist");
     }
+
+    private static ulong ToUInt64(object? value) => value switch
+    {
+        long l => unchecked((ulong)l),
+        ulong u => u,
+        int i => unchecked((ulong)(long)i),
+        uint ui => ui,
+        byte[] b when b.Length == 8 => System.Buffers.Binary.BinaryPrimitives.ReadUInt64BigEndian(b),
+        _ => 0,
+    };
 
     /// <summary>Periodic NTP-style timing queries to the iPhone, as an Apple TV would send.</summary>
     private static async Task TimingLoop(UdpClient socket, IPEndPoint remote, CancellationToken ct)
@@ -507,34 +581,95 @@ public sealed class AirPlayReceiver : IDisposable
     private async Task HandleMirrorAsync(TcpClient client, CancellationToken ct)
     {
         Session? s;
-        lock (_lock) s = _mirrorSession;
-        if (s?.KeyMessage == null || s.EncryptedKey == null)
+        // The iPhone opens the video socket right after SETUP; give the control thread a moment
+        // to publish the session in case the two connections race.
+        for (int i = 0; i < 40; i++)
         {
-            Log?.Invoke("Mirror data connection without a completed setup; closing");
+            lock (_lock) s = _mirrorSession;
+            if (s != null) break;
+            await Task.Delay(50, ct).ConfigureAwait(false);
+        }
+        lock (_lock) s = _mirrorSession;
+
+        string remote = client.Client.RemoteEndPoint?.ToString() ?? "?";
+        if (s == null)
+        {
+            Log?.Invoke($"Mirror data connection from {remote} without SETUP; closing");
             return;
         }
-        using var decoder = MirrorStreamDecoder.Create(s.KeyMessage, s.EncryptedKey, s.EcdhShared, s.StreamConnectionId);
+        if (s.KeyMessage == null)
+        {
+            Log?.Invoke("Mirror data connection before fp-setup; the iPhone's FairPlay handshake never completed");
+            return;
+        }
+        if (s.EncryptedKey == null)
+        {
+            Log?.Invoke("Mirror data connection before SETUP supplied ekey; closing");
+            return;
+        }
+
+        MirrorStreamDecoder decoder;
+        try
+        {
+            decoder = MirrorStreamDecoder.Create(s.KeyMessage, s.EncryptedKey, s.EcdhShared, s.StreamConnectionId);
+        }
+        catch (Exception e) when (e is InvalidOperationException or IndexOutOfRangeException or ArgumentException)
+        {
+            Log?.Invoke("Could not derive the mirror key: " + e.Message);
+            return;
+        }
+
+        _mirrorDecoder = decoder;
         var stream = client.GetStream();
         var header = new byte[MirrorStreamDecoder.HeaderSize];
         Interlocked.Increment(ref _activeMirrorStreams);
         SetState(ReceiverState.Connected);
-        Log?.Invoke("iPhone mirroring started");
+        Log?.Invoke($"iPhone mirroring started from {remote} (stream {s.StreamConnectionId}, ecdh={s.EcdhShared != null})");
+        long headers = 0;
         try
         {
             while (!ct.IsCancellationRequested)
             {
                 if (!await stream.ReadFullyAsync(header, header.Length, ct).ConfigureAwait(false)) break;
-                var (size, _) = MirrorStreamDecoder.ParseHeader(header);
-                if (size < 0 || size > 32 * 1024 * 1024) { Log?.Invoke("Mirror stream out of sync; closing"); break; }
+                var (size, type) = MirrorStreamDecoder.ParseHeader(header);
+                if (size < 0 || size > 32 * 1024 * 1024)
+                {
+                    Log?.Invoke($"Mirror stream out of sync (size={size}); closing");
+                    break;
+                }
                 var payload = new byte[size];
                 if (size > 0 && !await stream.ReadFullyAsync(payload, size, ct).ConfigureAwait(false)) break;
-                var packet = decoder.Handle(header, payload);
-                if (packet != null) VideoPacket?.Invoke(packet);
+                if (headers++ == 0) Log?.Invoke($"Mirror packet: type={type}, size={size}");
+                VideoPacket? packet;
+                try
+                {
+                    packet = decoder.Handle(header, payload);
+                }
+                catch (Exception e) when (e is IndexOutOfRangeException or ArgumentException or InvalidOperationException)
+                {
+                    Log?.Invoke($"Mirror packet could not be parsed (type={type}, size={size}): {e.Message}");
+                    break;
+                }
+                if (packet != null)
+                {
+                    if (packet.IsKeyFrame && decoder.KeyFrames == 1)
+                        Log?.Invoke($"First key frame: {packet.Data.Length} bytes, {decoder.Width}x{decoder.Height}");
+                    VideoPacket?.Invoke(packet);
+                }
+                else if (type == 1 && decoder.Width > 0)
+                {
+                    Log?.Invoke($"Video format: {decoder.Width}x{decoder.Height} ({size} byte config)");
+                }
             }
         }
         finally
         {
-            Log?.Invoke("iPhone mirroring stopped");
+            _lastMirrorIssue = decoder.LastIssue;
+            Log?.Invoke($"iPhone mirroring stopped: packets={decoder.Packets}, pictures={decoder.Pictures}, " +
+                        $"keyframes={decoder.KeyFrames}, invalid={decoder.InvalidPackets}" +
+                        (decoder.LastIssue is { } issue ? $" — {issue}" : ""));
+            _mirrorDecoder = null;
+            decoder.Dispose();
             if (Interlocked.Decrement(ref _activeMirrorStreams) <= 0 && State == ReceiverState.Connected)
                 SetState(ReceiverState.Waiting);
         }

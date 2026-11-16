@@ -106,6 +106,10 @@ public sealed class Studio : IDisposable
 
     public bool PhoneConnected => Receiver.State == ReceiverState.Connected || Engine.PhoneFrames.IsSimulated;
 
+    /// <summary>Pictures the Windows decoder has produced for the current iPhone session.</summary>
+    public long PhoneFramesDecoded { get { lock (_decoderLock) return _decoder?.FramesDecoded ?? 0; } }
+    public string? PhoneDecoderError { get { lock (_decoderLock) return _decoder?.Error; } }
+
     /// <summary>Recent AirPlay messages, newest last. Safe to call from the UI thread while the receiver is logging.</summary>
     public IReadOnlyList<string> ReceiverLogSnapshot()
     {

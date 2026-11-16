@@ -41,8 +41,15 @@ public partial class ConnectionDiagnosticsWindow : Window
             switch (state)
             {
                 case ReceiverState.Connected:
-                    AirPlayText.Text = Loc.T("DiagAirPlayConnected", _studio.Receiver.Name);
-                    AirPlayDot.Fill = Res("GreenBrush"); break;
+                {
+                    var who = string.Join(" · ", new[] { _studio.Receiver.ClientName, _studio.Receiver.ClientModel, _studio.Receiver.ClientVersion }
+                        .Where(s => !string.IsNullOrWhiteSpace(s)));
+                    AirPlayText.Text = who.Length == 0
+                        ? Loc.T("DiagAirPlayConnected", _studio.Receiver.Name)
+                        : Loc.T("DiagAirPlayConnected", _studio.Receiver.Name) + " — " + who;
+                    AirPlayDot.Fill = Res("GreenBrush");
+                    break;
+                }
                 case ReceiverState.Waiting:
                     AirPlayText.Text = Loc.T("DiagAirPlayRunning", _studio.Receiver.ControlPort, _studio.Receiver.AnnouncedAdapters);
                     AirPlayDot.Fill = Res("GreenBrush"); break;
@@ -52,6 +59,24 @@ public partial class ConnectionDiagnosticsWindow : Window
                 default:
                     AirPlayText.Text = Loc.T("DiagAirPlayStopped");
                     AirPlayDot.Fill = Res("SubtleBrush"); break;
+            }
+
+            var receiver = _studio.Receiver;
+            if (receiver.MirrorCodecUnsupported)
+            {
+                VideoText.Text = Loc.T("DiagVideoCodec");
+                VideoDot.Fill = Res("RedBrush");
+            }
+            else if (receiver.MirrorPackets == 0)
+            {
+                VideoText.Text = Loc.T("DiagVideoWaiting");
+                VideoDot.Fill = Res("AmberBrush");
+            }
+            else
+            {
+                VideoText.Text = Loc.T("DiagVideoLine", receiver.MirrorPackets, receiver.MirrorPictures,
+                    _studio.PhoneFramesDecoded, receiver.MirrorInvalid);
+                VideoDot.Fill = Res(_studio.PhoneFramesDecoded > 0 ? "GreenBrush" : "AmberBrush");
             }
 
             var log = _studio.ReceiverLogSnapshot();
@@ -139,6 +164,22 @@ public partial class ConnectionDiagnosticsWindow : Window
     }
 
     private void NetworkSettings_Click(object sender, RoutedEventArgs e) => NetworkDiagnostics.OpenNetworkSettings();
+
+    private void CopyLog_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var text = string.Join(Environment.NewLine, _studio.ReceiverLogSnapshot());
+            Clipboard.SetText(text.Length == 0 ? Loc.T("DiagNoLog") : text);
+            MessageText.Text = Loc.T("DiagCopied");
+            MessageText.Foreground = Res("GreenBrush");
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException)
+        {
+            MessageText.Text = Loc.T("DiagCopyFailed");
+            MessageText.Foreground = Res("RedBrush");
+        }
+    }
     private void InstallDrivers_Click(object sender, RoutedEventArgs e) => NetworkDiagnostics.OpenAppleDevicesStore();
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
 }

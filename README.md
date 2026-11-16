@@ -38,6 +38,15 @@
 2. تأكد أن الآيفون والكمبيوتر على **نفس شبكة Wi-Fi**، وأن الشبكة **خاصة** لا عامة، وأن VPN أو عزل العملاء (AP Isolation) غير مفعّل.
 3. أعد تشغيل AirPlay من زر «إعادة الاتصال»، ثم أعد فتح «انعكاس الشاشة» في الآيفون.
 
+### إصلاح 1.0.2 — الشاشة التي لا تظهر
+
+إذا كان الآيفون يتصل ويظهر «متصل» لكن الصورة لا تظهر، فالسبب كان في فك تشفير الفيديو: الآيفون يشفّر كل صور المرآة كتدفق AES‑CTR واحد متصل، وأي حزمة طولها ليس من مضاعفات 16 بايت تترك بقية مفتاح التشفير للحزمة التالية. كان الإصدار السابق يبدأ كل حزمة من جديد، فتفسد كل الصور بعد أول حزمة. الآن يُكمل فك التشفير من حيث انتهى بالضبط (نفس سلوك UxPlay وRPiPlay والمستقبلات الحديثة). كذلك:
+
+- يُقبل رد FairPlay الثاني بطول 164 أو 168 بايت (بعض إصدارات iOS ترسله 168).
+- صار رد `/info` يحتوي `txtAirPlay` و`txtRAOP` كما يتوقع الآيفون.
+- نافذة التشخيص تعرض الآن عدد حزم الفيديو والصور والإطارات المفكوكة والحزم التالفة، وزر «نسخ السجل».
+- لم يعد الاتصال يُقطع إذا فشل التحقق من توقيع الاقتران؛ يُسجَّل الخطأ وتستمر الجلسة.
+
 **بخصوص التعريفات:** AirPlay عبر Wi‑Fi **لا يحتاج أي تعريفات iPhone**. تعريفات Apple مطلوبة فقط لطريقة USB عبر شبكة «نقطة الاتصال الشخصية»، وتُثبّت من تطبيق **Apple Devices** الرسمي في متجر مايكروسوفت (زر «تثبيت Apple Devices» في نافذة الربط). لا يمكن تضمين تعريفات Apple داخل التطبيق لأنها ملكية خاصة بـApple.
 
 ### ربط الآيفون بالكابل (USB)
@@ -51,7 +60,7 @@
 
 ## ما تم التحقق منه
 
-يُبنى التطبيق ويُختبر تلقائيًا على Windows في كل تحديث: رسم المشهد، التقاط شاشة حقيقية، تسجيل 720p/30 و1080p/60 وقراءة الملف والتحقق من أبعاده ومعدل إطاره ومدته، كتابة المسار الصوتي، فك H.264، جلسة AirPlay حتى إعداد البث مع عميل محاكى، تشغيل الواجهة بالعربية والإنجليزية، وتثبيت المثبّت وإزالته.
+يُبنى التطبيق ويُختبر تلقائيًا على Windows في كل تحديث: رسم المشهد، التقاط شاشة حقيقية، تسجيل 720p/30 و1080p/60 وقراءة الملف والتحقق من أبعاده ومعدل إطاره ومدته، كتابة المسار الصوتي، فك H.264، وجلسة AirPlay كاملة مع عميل محاكى (اقتران، FairPlay، إعداد البث، وفك صور H.264 مشفّرة)، تشغيل الواجهة بالعربية والإنجليزية، وتثبيت المثبّت وإزالته.
 
 لم يتوفر جهاز iPhone حقيقي في بيئة البناء، لذلك لم يُختبر الاستقبال من هاتف فعلي أو إصدار iOS محدد. الاتصال يحتاج شبكة محلية واحدة وسماح جدار الحماية. صوت الآيفون لا يُسجَّل في هذه النسخة.
 
@@ -93,13 +102,22 @@ In the preview, drag a layer to move it, drag a corner to resize, drag the top h
 
 If the name never appears: open **Connect iPhone → Connection diagnostics → Repair connection**. This adds the app's firewall and mDNS rules and sets a Public network to Private when needed (Windows may ask for administrator rights). Also check that both devices are on the same Wi-Fi, VPN/AP isolation is off, and the network is Private.
 
+### Fixed in 1.0.2 — the screen that never appeared
+
+When the iPhone connected and the app said "connected" but no picture appeared, the cause was video decryption: the iPhone encrypts the whole mirror stream as **one continuous AES-CTR keystream**, and any packet whose length is not a multiple of 16 bytes leaves the tail of a keystream block for the next packet. The previous build restarted the cipher at every packet, corrupting every picture after the first one. Decryption now continues exactly where the previous packet stopped (the behaviour of UxPlay, RPiPlay and current receivers). Also:
+
+- The second FairPlay reply is accepted at 164 **or** 168 bytes (some iOS versions send 168).
+- `/info` now carries `txtAirPlay` and `txtRAOP` the way iOS expects.
+- Connection diagnostics show video packets, pictures, decoded frames and invalid packets, plus a **Copy log** button.
+- A failed pair-verify signature no longer drops the connection; it is logged and the session continues.
+
 **Drivers:** AirPlay over Wi-Fi needs **no iPhone drivers**. Apple's drivers are only needed for the USB hotspot network, installed from the official **Apple Devices** app in the Microsoft Store (button in the Connect window). Apple's proprietary drivers cannot be bundled in this app.
 
 **USB cable:** install *Apple Devices* (Microsoft Store) or iTunes → plug in and tap *Trust* → turn on *Personal Hotspot* → Control Center → Screen Mirroring → **SMAET REC**. The picture then travels over the cable's network link instead of Wi-Fi. This is AirPlay over the wire, not a raw USB video capture: Windows has no supported driver for raw iPhone screen capture, and the unofficial route replaces Apple's driver and breaks syncing, so it is deliberately not used.
 
 ### Limitations and what has been tested
 
-Tested automatically on every build (GitHub Windows runner): drawing of the scene, real screen capture, 720p/30 and 1080p/60 recordings read back and checked (size, frame rate, orientation, duration), sound track writing, H.264 decoding, the AirPlay conversation up to stream setup against a simulated client, app start-up in Arabic and English, installer install/uninstall.
+Tested automatically on every build (GitHub Windows runner): drawing of the scene, real screen capture, 720p/30 and 1080p/60 recordings read back and checked (size, frame rate, orientation, duration), sound track writing, H.264 decoding, a full AirPlay session against a simulated iPhone (pairing, FairPlay, stream setup, and decryption of encrypted H.264 pictures), app start-up in Arabic and English, installer install/uninstall.
 
 **Not tested on real hardware** (no device was available during development):
 
