@@ -59,7 +59,9 @@ public partial class ConnectPhoneWindow : Window
             _usbDeviceId = usb.DeviceId;
             _usbReady = usb.PhonePluggedIn;
             ConnectUsb.IsEnabled = usb.PhonePluggedIn && _usbDeviceId != null && !_usbConnecting && !_studio.UsbSessionActive;
-            ConnectUsb.Content = _studio.UsbConnected ? "USB streaming" : _studio.UsbSessionActive ? "Waiting for video..." : "Connect USB";
+            ConnectUsb.Content = _studio.UsbConnected ? "USB streaming"
+                : _usbConnecting ? _studio.UsbStatus
+                : _studio.UsbSessionActive ? "Waiting for video..." : "Connect USB";
             Set(UsbPhone, UsbPhoneDot, usb.PhonePluggedIn, Loc.T(usb.PhonePluggedIn ? "UsbPhoneFound" : "UsbPhoneMissing"));
             Set(UsbDriver, UsbDriverDot, usb.AppleDriverInstalled, Loc.T(usb.AppleDriverInstalled ? "UsbDriverFound" : "UsbDriverMissing"));
             Set(UsbNetwork, UsbNetworkDot, usb.NetworkAddress != null, usb.NetworkAddress != null ? Loc.T("UsbNetworkUp", usb.NetworkAddress) : Loc.T("UsbNetworkDown"));
