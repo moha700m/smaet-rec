@@ -17,8 +17,13 @@ public sealed class DirectUsbCaptureClient : IAsyncDisposable
     private Task? _reader;
     private int _started;
     private int _pipeConnected;
+    private int _streaming;
+    private readonly TaskCompletionSource<bool> _firstFrame = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private string _lastStatus = "Starting the USB capture host.";
 
-    public bool IsActive => Volatile.Read(ref _started) != 0 && Volatile.Read(ref _pipeConnected) != 0;
+    /// <summary>True only after the native host has delivered a real decoded frame.</summary>
+    public bool IsActive => Volatile.Read(ref _started) != 0 &&
+        Volatile.Read(ref _pipeConnected) != 0 && Volatile.Read(ref _streaming) != 0;
 
     public event Action<byte[], int, int, long>? VideoFrame;
     public event Action<string>? Status;
@@ -54,8 +59,27 @@ public sealed class DirectUsbCaptureClient : IAsyncDisposable
             if (completed == timeout) throw new TimeoutException("USB host did not connect to the IPC pipe within 25 seconds.");
             await connection.ConfigureAwait(false);
             Volatile.Write(ref _pipeConnected, 1);
-            Status?.Invoke("USB host IPC connected; waiting for QuickTime video.");
+            _lastStatus = "USB host IPC connected; waiting for the iPhone capture handshake.";
+            Status?.Invoke(_lastStatus);
             _reader = ReadLoopAsync(_pipe, _stop.Token);
+
+            // A named-pipe connection only proves that the helper process started.
+            // It does not prove that the iPhone accepted QuickTime or sent a picture.
+            // Do not report a successful USB connection until the first decoded frame.
+            var firstFrame = _firstFrame.Task;
+            var firstFrameTimeout = Task.Delay(TimeSpan.FromSeconds(55), _stop.Token);
+            var firstResult = await Task.WhenAny(firstFrame, exited, firstFrameTimeout).ConfigureAwait(false);
+            if (firstResult == exited)
+            {
+                await exited.ConfigureAwait(false);
+                throw new IOException($"USB host exited before the first iPhone video frame (exit code {_host.ExitCode}). Last stage: {_lastStatus}");
+            }
+            if (firstResult == firstFrameTimeout)
+            {
+                _stop.Token.ThrowIfCancellationRequested();
+                throw new TimeoutException($"iPhone USB capture did not produce a video frame within 55 seconds. Last stage: {_lastStatus}. Keep the iPhone unlocked and trusted, then unplug and reconnect the cable before retrying.");
+            }
+            await firstFrame.ConfigureAwait(false);
         }
         catch
         {
@@ -83,7 +107,12 @@ public sealed class DirectUsbCaptureClient : IAsyncDisposable
                 var root = doc.RootElement;
                 switch (root.GetProperty("type").GetString())
                 {
-                    case "status": Status?.Invoke(root.GetProperty("message").GetString() ?? ""); break;
+                    case "status":
+                    {
+                        _lastStatus = root.GetProperty("message").GetString() ?? "Native USB host is working.";
+                        Status?.Invoke(_lastStatus);
+                        break;
+                    }
                     case "video":
                     {
                         int payloadBytes = root.GetProperty("payloadBytes").GetInt32();
@@ -96,6 +125,8 @@ public sealed class DirectUsbCaptureClient : IAsyncDisposable
                             stride != checked(width * 4) || payloadBytes != checked(stride * height) ||
                             payloadOffset + payloadBytes != record.Length)
                             throw new InvalidDataException("Invalid BGRA video IPC frame.");
+                        Volatile.Write(ref _streaming, 1);
+                        _firstFrame.TrySetResult(true);
                         VideoFrame?.Invoke(record.AsSpan(payloadOffset, payloadBytes).ToArray(), width, height,
                             root.GetProperty("timestamp100ns").GetInt64());
                         break;
@@ -108,8 +139,18 @@ public sealed class DirectUsbCaptureClient : IAsyncDisposable
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (EndOfStreamException e) when (!token.IsCancellationRequested) { Failed?.Invoke(e.Message); }
-        catch (Exception e) when (e is IOException or InvalidDataException or JsonException or KeyNotFoundException or OverflowException or InvalidOperationException) { Failed?.Invoke(e.Message); }
-        finally { Volatile.Write(ref _pipeConnected, 0); Disconnected?.Invoke(); }
+        catch (Exception e) when (e is IOException or InvalidDataException or JsonException or KeyNotFoundException or OverflowException or InvalidOperationException)
+        {
+            _firstFrame.TrySetException(e);
+            Failed?.Invoke(e.Message);
+        }
+        finally
+        {
+            Volatile.Write(ref _streaming, 0);
+            Volatile.Write(ref _pipeConnected, 0);
+            _firstFrame.TrySetException(new IOException($"USB host closed before a decoded frame arrived. Last stage: {_lastStatus}"));
+            Disconnected?.Invoke();
+        }
     }
 
     private static async Task ReadExactlyAsync(Stream stream, Memory<byte> buffer, CancellationToken token)
@@ -129,6 +170,8 @@ public sealed class DirectUsbCaptureClient : IAsyncDisposable
             catch (System.ComponentModel.Win32Exception) { }
         }
         _host?.Dispose(); _host = null; _pipe?.Dispose(); _pipe = null; _stop?.Dispose(); _stop = null;
+        Volatile.Write(ref _streaming, 0);
+        Volatile.Write(ref _pipeConnected, 0);
         Interlocked.Exchange(ref _started, 0);
     }
     public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
