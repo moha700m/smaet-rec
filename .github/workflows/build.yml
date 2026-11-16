@@ -114,28 +114,206 @@ jobs:
       - name: Installer test (install, run, uninstall, reinstall)
         shell: pwsh
         run: |
-          $setup = Get-ChildItem publish\SmaetRec-Setup-*.exe | Select-Object -First 1
-          $exe = "$env:ProgramFiles\SMAET REC\SmaetRec.exe"
-          foreach ($round in 1,2) {
-            $p = Start-Process $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait -PassThru
-            if ($p.ExitCode -ne 0) { throw "installer exit code $($p.ExitCode) (round $round)" }
-            if (!(Test-Path $exe)) { throw "installed program not found (round $round)" }
-            if (!(Test-Path "$env:ProgramFiles\SMAET REC\usb\iphone-usb-host.exe")) { throw "installed USB host not found" }
-            Write-Host "Round ${round}: installed $exe ($((Get-Item $exe).VersionInfo.ProductVersion))"
-            $rules = netsh advfirewall firewall show rule name="SMAET REC"
-            if (!($rules -match "SMAET REC")) { throw "firewall rule missing after install" }
-            $app = Start-Process $exe -ArgumentList "--dev-simulated-source" -PassThru
-            Start-Sleep -Seconds 8
-            if ($app.HasExited) { throw "installed app exited early with code $($app.ExitCode)" }
-            $null = $app.CloseMainWindow()
-            if (!$app.WaitForExit(15000)) { $app.Kill(); throw "installed app did not close" }
-            $u = Start-Process "$env:ProgramFiles\SMAET REC\unins000.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -Wait -PassThru
-            if ($u.ExitCode -ne 0) { throw "uninstaller exit code $($u.ExitCode)" }
-            Start-Sleep -Seconds 2
-            if (Test-Path $exe) { throw "program still present after uninstall" }
-            $after = netsh advfirewall firewall show rule name="SMAET REC"
-            if ($after -match "Rule Name") { throw "firewall rule left behind after uninstall" }
+          $ErrorActionPreference = "Stop"
+          $diagDir = Join-Path $env:SMAET_ARTIFACTS "installer-test"
+          New-Item -ItemType Directory -Path $diagDir -Force | Out-Null
+
+          $setupFiles = @(Get-ChildItem publish\SmaetRec-Setup-*.exe -ErrorAction Stop)
+          if ($setupFiles.Count -eq 0) { throw "Installer executable was not produced." }
+          $setup = $setupFiles | Select-Object -First 1
+          $exe = Join-Path $env:ProgramFiles "SMAET REC\SmaetRec.exe"
+          $installDir = Join-Path $env:ProgramFiles "SMAET REC"
+          $ruleNames = @("SMAET REC", "SMAET REC mDNS")
+
+          function Get-FirewallRuleSnapshot {
+            param([string[]]$Names)
+
+            if (Get-Command Get-NetFirewallRule -ErrorAction SilentlyContinue) {
+              try {
+                $rules = @()
+                foreach ($name in $Names) {
+                  $rules += @(Get-NetFirewallRule -DisplayName $name -ErrorAction Stop)
+                }
+                $present = @($rules | Select-Object -ExpandProperty DisplayName -Unique)
+                return [pscustomobject]@{
+                  Provider = "NetSecurity"
+                  PresentNames = [string[]]$present
+                  Rules = $rules
+                }
+              }
+              catch {
+                Write-Warning "NetSecurity query failed; using netsh fallback: $($_.Exception.Message)"
+              }
+            }
+
+            $present = @()
+            foreach ($name in $Names) {
+              $output = @(& netsh.exe advfirewall firewall show rule name="$name" 2>&1)
+              $exitCode = $LASTEXITCODE
+              $text = $output -join [Environment]::NewLine
+              if ($exitCode -eq 0 -and $text.IndexOf($name, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                $present += $name
+              }
+              elseif ($exitCode -eq 1) {
+                # netsh returns 1 when the named rule is absent; this is expected after uninstall.
+              }
+              else {
+                throw "netsh firewall query for '$name' failed with exit code $exitCode. Output: $text"
+              }
+            }
+
+            return [pscustomobject]@{
+              Provider = "netsh"
+              PresentNames = [string[]]$present
+              Rules = @()
+            }
           }
+
+          function Write-DiagnosticState {
+            param([string]$Stage)
+
+            Write-Host "========== Installer diagnostics: $Stage =========="
+            Write-Host "Install directory exists: $(Test-Path -LiteralPath $installDir)"
+            if (Test-Path -LiteralPath $installDir) {
+              Get-ChildItem -LiteralPath $installDir -Force -ErrorAction SilentlyContinue |
+                Select-Object Name, Length, LastWriteTime |
+                Format-Table -AutoSize | Out-String | Write-Host
+            }
+
+            try {
+              $snapshot = Get-FirewallRuleSnapshot -Names $ruleNames
+              Write-Host "Firewall provider: $($snapshot.Provider)"
+              Write-Host "Firewall rules found: $(@($snapshot.PresentNames) -join ', ')"
+              if (@($snapshot.Rules).Count -gt 0) {
+                $snapshot.Rules |
+                  Select-Object DisplayName, Enabled, Direction, Action, Profile |
+                  Format-Table -AutoSize | Out-String | Write-Host
+                foreach ($rule in $snapshot.Rules) {
+                  Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $rule -ErrorAction SilentlyContinue |
+                    Select-Object Program |
+                    Format-Table -AutoSize | Out-String | Write-Host
+                }
+              }
+            }
+            catch {
+              Write-Host "Firewall diagnostic query failed: $($_.Exception.Message)"
+            }
+
+            $processes = @(Get-Process -Name SmaetRec, iphone-usb-host -ErrorAction SilentlyContinue)
+            if ($processes.Count -gt 0) {
+              $processes | Select-Object ProcessName, Id, Path |
+                Format-Table -AutoSize | Out-String | Write-Host
+            }
+            else {
+              Write-Host "No SMAET REC or iPhone USB host processes remain."
+            }
+
+            $pending = Get-ItemPropertyValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager" -Name PendingFileRenameOperations -ErrorAction SilentlyContinue
+            if ($pending) {
+              Write-Host ("PendingFileRenameOperations:" + [Environment]::NewLine + ($pending -join [Environment]::NewLine))
+            }
+
+            Get-ChildItem -LiteralPath $diagDir -File -ErrorAction SilentlyContinue |
+              Select-Object Name, Length |
+              Format-Table -AutoSize | Out-String | Write-Host
+          }
+
+          try {
+            foreach ($round in 1,2) {
+              $installLog = Join-Path $diagDir "smaet-install-$round.log"
+              $installArgs = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$installLog")
+              $install = Start-Process -FilePath $setup.FullName -ArgumentList $installArgs -Wait -PassThru
+              if ($install.ExitCode -ne 0) { throw "Installer exit code $($install.ExitCode) (round $round). Log: $installLog" }
+
+              if (!(Test-Path -LiteralPath $exe)) { throw "Installed program not found (round $round)." }
+              $usbHost = Join-Path $installDir "usb\iphone-usb-host.exe"
+              if (!(Test-Path -LiteralPath $usbHost)) { throw "Installed USB host not found (round $round)." }
+              Write-Host "Round $($round): installed $exe ($((Get-Item -LiteralPath $exe).VersionInfo.ProductVersion))"
+
+              $installedRules = Get-FirewallRuleSnapshot -Names $ruleNames
+              $missingRules = @($ruleNames | Where-Object { $_ -notin @($installedRules.PresentNames) })
+              if ($missingRules.Count -gt 0) {
+                throw "Firewall rules missing after install (provider=$($installedRules.Provider)): $($missingRules -join ', ')"
+              }
+              if ($installedRules.Provider -eq "NetSecurity") {
+                $invalidRules = @($installedRules.Rules | Where-Object {
+                  $_.Enabled -ne "True" -or $_.Direction -ne "Inbound" -or $_.Action -ne "Allow"
+                })
+                if ($invalidRules.Count -gt 0) {
+                  throw "Installed firewall rules are not enabled inbound allow rules: $($invalidRules.DisplayName -join ', ')"
+                }
+              }
+
+              $app = Start-Process -FilePath $exe -ArgumentList @("--dev-simulated-source") -PassThru
+              try {
+                Start-Sleep -Seconds 8
+                $app.Refresh()
+                if ($app.HasExited) { throw "Installed app exited early with code $($app.ExitCode) (round $round)." }
+                Write-Host "Installed app running: PID $($app.Id), $([math]::Round($app.WorkingSet64/1MB)) MB"
+                $null = $app.CloseMainWindow()
+                if (!$app.WaitForExit(15000)) {
+                  Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
+                  throw "Installed app did not close (round $round)."
+                }
+              }
+              finally {
+                $app.Refresh()
+                if (!$app.HasExited) {
+                  Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
+                }
+              }
+
+              $left = @(Get-Process -Name iphone-usb-host -ErrorAction SilentlyContinue)
+              if ($left.Count -gt 0) {
+                throw "A USB host process was left behind after app shutdown: $($left.Id -join ', ')"
+              }
+
+              $uninstallLog = Join-Path $diagDir "smaet-uninstall-$round.log"
+              $uninstaller = Join-Path $installDir "unins000.exe"
+              if (!(Test-Path -LiteralPath $uninstaller)) { throw "Uninstaller not found: $uninstaller" }
+              $uninstallArgs = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/LOG=$uninstallLog")
+              $uninstall = Start-Process -FilePath $uninstaller -ArgumentList $uninstallArgs -Wait -PassThru
+              if ($uninstall.ExitCode -ne 0) {
+                throw "Uninstaller exit code $($uninstall.ExitCode) (round $round). Log: $uninstallLog"
+              }
+
+              # Uninstall cleanup may complete just after the uninstaller process exits.
+              $deadline = [DateTime]::UtcNow.AddSeconds(15)
+              do {
+                Start-Sleep -Milliseconds 500
+                $after = Get-FirewallRuleSnapshot -Names $ruleNames
+                $programStillExists = Test-Path -LiteralPath $exe
+                if (!$programStillExists -and @($after.PresentNames).Count -eq 0) { break }
+              } while ([DateTime]::UtcNow -lt $deadline)
+
+              if (Test-Path -LiteralPath $exe) {
+                throw "Program still present after uninstall (round $round)."
+              }
+              if (@($after.PresentNames).Count -gt 0) {
+                throw "Firewall rules remain after uninstall (provider=$($after.Provider)): $($after.PresentNames -join ', ')"
+              }
+              Write-Host "Round $($round): uninstall verified; both firewall rules are absent."
+            }
+          }
+          catch {
+            Write-Host "Installer verification failed: $($_.Exception.Message)"
+            Write-DiagnosticState -Stage "Failure"
+            throw
+          }
+          finally {
+            Write-DiagnosticState -Stage "Final"
+          }
+
+          Write-Host "Installer install/run/uninstall/reinstall verification passed."
+          exit 0
+      - name: Upload installer test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-test-diagnostics
+          path: artifacts/installer-test/**
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Checksums
         shell: pwsh
         run: |
