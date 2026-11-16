@@ -78,6 +78,12 @@ public partial class ConnectionDiagnosticsWindow : Window
                     _studio.PhoneFramesDecoded, receiver.MirrorInvalid)
                     + (receiver.MirrorKeyVariant is { } key ? $" · {key}" : "");
                 VideoDot.Fill = Res(_studio.PhoneFramesDecoded > 0 ? "GreenBrush" : "AmberBrush");
+                if (_studio.PhonePacketsDropped > 0)
+                {
+                    VideoText.Text += Environment.NewLine + Loc.T("DiagTooSlow", _studio.PhonePacketsDropped);
+                    VideoDot.Fill = Res("RedBrush");
+                }
+                VideoText.ToolTip = _studio.PhoneDecoderStats;
             }
 
             var log = _studio.ReceiverLogSnapshot();
@@ -166,11 +172,34 @@ public partial class ConnectionDiagnosticsWindow : Window
 
     private void NetworkSettings_Click(object sender, RoutedEventArgs e) => NetworkDiagnostics.OpenNetworkSettings();
 
+    private void SaveSample_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var folder = _studio.SaveDiagnosticSample();
+            if (folder == null)
+            {
+                MessageText.Text = Loc.T("DiagSampleNone");
+                MessageText.Foreground = Res("AmberBrush");
+                return;
+            }
+            MessageText.Text = Loc.T("DiagSampleSaved", folder);
+            MessageText.Foreground = Res("GreenBrush");
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"\"{folder}\"") { UseShellExecute = true });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            MessageText.Text = ex.Message;
+            MessageText.Foreground = Res("RedBrush");
+        }
+    }
+
     private void CopyLog_Click(object sender, RoutedEventArgs e)
     {
         try
         {
             var text = string.Join(Environment.NewLine, _studio.ReceiverLogSnapshot());
+            if (_studio.PhoneDecoderStats is { } stats) text += Environment.NewLine + "Decoder now: " + stats;
             Clipboard.SetText(text.Length == 0 ? Loc.T("DiagNoLog") : text);
             MessageText.Text = Loc.T("DiagCopied");
             MessageText.Foreground = Res("GreenBrush");

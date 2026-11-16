@@ -52,6 +52,7 @@
                     <Button Style="{StaticResource PlainButton}" Content="{Binding [DiagNetworkSettings], Source={x:Static core:Loc.Instance}}" Click="NetworkSettings_Click"/>
                     <Button Style="{StaticResource PlainButton}" Content="{Binding [DiagInstallDrivers], Source={x:Static core:Loc.Instance}}" Click="InstallDrivers_Click"/>
                     <Button Style="{StaticResource PlainButton}" Content="{Binding [DiagCopyLog], Source={x:Static core:Loc.Instance}}" Click="CopyLog_Click"/>
+                    <Button Style="{StaticResource PlainButton}" Content="{Binding [DiagSaveSample], Source={x:Static core:Loc.Instance}}" Click="SaveSample_Click"/>
                 </WrapPanel>
 
                 <TextBlock x:Name="MessageText" Foreground="{StaticResource SubtleBrush}" FontSize="12.5" Margin="2,10,2,0" TextWrapping="Wrap"/>
