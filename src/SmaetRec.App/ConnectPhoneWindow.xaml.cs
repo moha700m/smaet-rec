@@ -63,9 +63,9 @@ public partial class ConnectPhoneWindow : Window
                 : _usbConnecting ? _studio.UsbStatus
                 : _studio.UsbSessionActive ? "Waiting for video..." : "Connect USB";
             Set(UsbPhone, UsbPhoneDot, usb.PhonePluggedIn, Loc.T(usb.PhonePluggedIn ? "UsbPhoneFound" : "UsbPhoneMissing"));
-            Set(UsbDriver, UsbDriverDot, usb.AppleDriverInstalled, Loc.T(usb.AppleDriverInstalled ? "UsbDriverFound" : "UsbDriverMissing"));
+            Set(UsbDriver, UsbDriverDot, usb.AppleSupportInstalled, Loc.T(usb.AppleSupportInstalled ? "UsbDriverFound" : "UsbDriverMissing"));
             Set(UsbNetwork, UsbNetworkDot, usb.NetworkAddress != null, usb.NetworkAddress != null ? Loc.T("UsbNetworkUp", usb.NetworkAddress) : Loc.T("UsbNetworkDown"));
-            GetAppleDevices.Visibility = usb.AppleDriverInstalled ? Visibility.Collapsed : Visibility.Visible;
+            GetAppleDevices.Visibility = usb.AppleSupportInstalled ? Visibility.Collapsed : Visibility.Visible;
         }
         finally { _checking = false; }
     }
