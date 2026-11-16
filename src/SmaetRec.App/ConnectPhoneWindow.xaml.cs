@@ -16,6 +16,7 @@ public partial class ConnectPhoneWindow : Window
     private bool _checking;
     private bool _usbConnecting;
     private bool _usbReady;
+    private bool _detailsOpenedOnce;
     private string? _usbDeviceId;
     private ConnectionDiagnosticsWindow? _diagnostics;
 
@@ -78,6 +79,20 @@ public partial class ConnectPhoneWindow : Window
             Set(UsbParent, UsbParentDot, usb.PhonePluggedIn && usb.ParentCompositeDriverReady,
                 Loc.T(!usb.PhonePluggedIn ? "UsbParentNoPhone" : usb.ParentCompositeDriverReady ? "UsbParentReady" : "UsbParentWrong", usb.ParentDriverService ?? "unknown"));
             GetAppleDevices.Visibility = usb.AppleUsbDriverInstalled ? Visibility.Collapsed : Visibility.Visible;
+
+            // One plain sentence on top; the technical rows stay folded away unless something needs fixing.
+            string? problem =
+                !usb.PhonePluggedIn ? Loc.T("UsbPhoneMissing")
+                : !usb.AppleUsbDriverInstalled ? Loc.T("UsbDriverMissing")
+                : !usb.AppleMuxAvailable ? muxMessage
+                : !usb.ParentCompositeDriverReady ? Loc.T("UsbParentWrong", usb.ParentDriverService ?? "unknown")
+                : !usb.CaptureFilterAttached ? filterMessage
+                : null;
+            bool live = _studio.UsbState is Studio.UsbPhase.Live or Studio.UsbPhase.Stalled;
+            UsbSummary.Text = live ? Loc.T("UsbLive", _studio.UsbFps.ToString("0")) : problem ?? Loc.T("UsbReady");
+            UsbSummaryDot.Fill = Res(live || problem == null ? "GreenBrush" : usb.PhonePluggedIn ? "AmberBrush" : "SubtleBrush");
+            InstallUsbDriver.Visibility = File.Exists(Path.Combine(AppContext.BaseDirectory, "usb", "iPhoneMirror.Driver.exe")) ? Visibility.Visible : Visibility.Collapsed;
+            if (problem != null && usb.PhonePluggedIn && !_detailsOpenedOnce) { _detailsOpenedOnce = true; UsbDetails.IsExpanded = true; }
         }
         finally { _checking = false; }
     }
