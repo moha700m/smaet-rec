@@ -73,16 +73,16 @@ public sealed class Studio : IDisposable
         catch (Exception e) when (e is not OutOfMemoryException) { Log.Error("Receiver start", e); }
     });
 
-    public async Task ConnectUsbAsync(string udid, CancellationToken cancellationToken = default)
+    public async Task ConnectUsbAsync(string usbSerial, CancellationToken cancellationToken = default)
     {
         await StopUsbAsync().ConfigureAwait(false);
         var client = new DirectUsbCaptureClient(AppContext.BaseDirectory);
-        client.VideoAccessUnit += OnDirectUsbVideo;
+        client.VideoFrame += OnDirectUsbFrame;
         client.Status += message => Log.Write("USB: " + message);
         client.Failed += message => { Log.Write("USB error: " + message); PhoneStateChanged?.Invoke(); };
         client.Disconnected += () => { _usbStreaming = false; PhoneStateChanged?.Invoke(); };
         _usbClient = client;
-        try { await client.StartAsync(udid, cancellationToken).ConfigureAwait(false); }
+        try { await client.StartAsync(usbSerial, cancellationToken).ConfigureAwait(false); }
         catch { _usbClient = null; await client.DisposeAsync().ConfigureAwait(false); throw; }
         PhoneStateChanged?.Invoke();
     }
@@ -93,22 +93,17 @@ public sealed class Studio : IDisposable
         _usbClient = null;
         _usbStreaming = false;
         if (client != null) await client.DisposeAsync().ConfigureAwait(false);
+        if (Receiver.State != ReceiverState.Connected && !Engine.PhoneFrames.IsSimulated) Engine.PhoneFrames.Clear();
         PhoneStateChanged?.Invoke();
     }
 
-    private void OnDirectUsbVideo(byte[] data, long timestampMicros, bool keyFrame)
+    private void OnDirectUsbFrame(byte[] bgra, int width, int height, long timestamp100ns)
     {
+        // iPhoneMirror's GPL Core API already decodes QuickTime FEED samples to
+        // BGRA. Forward decoded pixels directly; do not pretend they are H.264.
         _usbStreaming = true;
+        Engine.PhoneFrames.Submit(bgra, width, height);
         PhoneStateChanged?.Invoke();
-        lock (_decoderLock)
-        {
-            _decoder ??= new H264Decoder(Engine.PhoneFrames);
-            long pts = timestampMicros - (_firstPacketTimestamp ??= timestampMicros);
-            if (pts < 0) pts = 0;
-            if (pts <= _lastPacketPts) pts = _lastPacketPts + 1;
-            _lastPacketPts = pts;
-            _decoder.Push(data, pts, keyFrame);
-        }
     }
 
     private void OnVideoPacket(VideoPacket packet)
