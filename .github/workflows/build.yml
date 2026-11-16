@@ -97,9 +97,10 @@ jobs:
           $dest = Join-Path $env:RUNNER_TEMP "portable"
           Expand-Archive $zip.FullName -DestinationPath $dest -Force
           $root = Join-Path $dest "SmaetRec"
-          foreach ($f in "SmaetRec.exe","SmaetRec.dll","SmaetRec.Media.dll","SmaetRec.AirPlay.dll","SmaetRec.Core.dll","coreclr.dll","hostfxr.dll","wpfgfx_cor3.dll","usb\iphone-usb-host.exe","usb\iPhoneMirror.Core.dll","usb\iPhoneMirror.Driver.exe","usb\LICENSE-GPL-3.0.txt","usb-host-source.zip","LICENSE","THIRD-PARTY-NOTICES.md","README.md") {
+          foreach ($f in "SmaetRec.exe","SmaetRec.dll","SmaetRec.Media.dll","SmaetRec.AirPlay.dll","SmaetRec.Core.dll","coreclr.dll","usb\iphone-usb-host.exe","usb\iPhoneMirror.Driver.exe","usb\LICENSE-GPL-3.0.txt","usb-host-source.zip","LICENSE","THIRD-PARTY-NOTICES.md","README.md") {
             if (!(Test-Path (Join-Path $root $f))) { throw "portable package is missing $f" }
           }
+          Write-Host "USB runtime files:"; Get-ChildItem (Join-Path $root "usb") | ForEach-Object { Write-Host "  $($_.Name)  $($_.Length)" }
           Write-Host "USB runtime files:"; Get-ChildItem (Join-Path $root "usb") | ForEach-Object { Write-Host "  $($_.Name)  $($_.Length)" }
           $p = Start-Process (Join-Path $root "SmaetRec.exe") -ArgumentList "--dev-simulated-source" -PassThru
           Start-Sleep -Seconds 8
