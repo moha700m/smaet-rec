@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows:
     runs-on: windows-latest
@@ -17,9 +21,31 @@ jobs:
       DOTNET_NOLOGO: true
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
+      - name: Set up .NET 10 (upstream driver manager)
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Set up CMake
+        uses: lukka/get-cmake@latest
+      - name: Build isolated GPL USB host
+        run: |
+          cmake -S usb-host -B build/usb-host -A x64
+          cmake --build build/usb-host --config Release --target iphone-usb-host
+      - name: Stage USB runtime and license
+        shell: pwsh
+        run: |
+          $usb = "src/SmaetRec.App/usb"
+          New-Item -ItemType Directory -Force $usb | Out-Null
+          Copy-Item "build/usb-host/package/usb/*" $usb -Force
+          Copy-Item "usb-host/LICENSE-GPL-3.0.txt" "$usb/LICENSE-GPL-3.0.txt" -Force
+          dotnet publish third_party/iphone-usb-host/src/DriverInstaller/iPhoneMirror.DriverInstaller.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o build/usb-driver-manager
+          Copy-Item "build/usb-driver-manager/iPhoneMirror.Driver.exe" "$usb/iPhoneMirror.Driver.exe" -Force
+          Copy-Item "third_party/iphone-usb-host/THIRD_PARTY_NOTICES.md" "$usb/UPSTREAM-THIRD-PARTY-NOTICES.md" -Force
       - name: Version
         id: version
         shell: pwsh
@@ -45,6 +71,10 @@ jobs:
           if-no-files-found: ignore
       - name: Publish (self-contained, no .NET install needed)
         run: dotnet publish src/SmaetRec.App -c Release -r win-x64 --self-contained true -p:Version=${{ steps.version.outputs.value }} -o publish/SmaetRec
+      - name: Include GPL corresponding source
+        shell: pwsh
+        run: |
+          Compress-Archive -Path usb-host, third_party/iphone-usb-host, docs/direct-usb-host.md -DestinationPath publish/SmaetRec/usb-host-source.zip -CompressionLevel Optimal
       - name: Zip package
         shell: pwsh
         run: |

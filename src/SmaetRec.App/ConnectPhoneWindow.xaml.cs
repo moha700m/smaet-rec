@@ -15,6 +15,7 @@ public partial class ConnectPhoneWindow : Window
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1.5) };
     private bool _checking;
     private bool _usbConnecting;
+    private bool _usbReady;
     private string? _usbDeviceId;
     private ConnectionDiagnosticsWindow? _diagnostics;
 
@@ -56,7 +57,8 @@ public partial class ConnectPhoneWindow : Window
         {
             var usb = await Task.Run(UsbPhoneDetector.Check);
             _usbDeviceId = usb.DeviceId;
-            ConnectUsb.IsEnabled = _usbDeviceId != null && !_usbConnecting && !_studio.UsbSessionActive;
+            _usbReady = usb.Ready;
+            ConnectUsb.IsEnabled = usb.Ready && _usbDeviceId != null && !_usbConnecting && !_studio.UsbSessionActive;
             ConnectUsb.Content = _studio.UsbConnected ? "USB streaming" : _studio.UsbSessionActive ? "Waiting for video..." : "Connect USB";
             Set(UsbPhone, UsbPhoneDot, usb.PhonePluggedIn, Loc.T(usb.PhonePluggedIn ? "UsbPhoneFound" : "UsbPhoneMissing"));
             Set(UsbDriver, UsbDriverDot, usb.AppleDriverInstalled, Loc.T(usb.AppleDriverInstalled ? "UsbDriverFound" : "UsbDriverMissing"));
@@ -81,7 +83,7 @@ public partial class ConnectPhoneWindow : Window
         _usbConnecting = true; ConnectUsb.IsEnabled = false; ConnectUsb.Content = "Connecting...";
         try { await _studio.ConnectUsbAsync(_usbDeviceId); ConnectUsb.Content = "Waiting for video..."; }
         catch (Exception ex) { ConnectUsb.Content = "Connect USB"; MessageBox.Show(this, ex.Message, "Direct USB capture", MessageBoxButton.OK, MessageBoxImage.Warning); }
-        finally { _usbConnecting = false; ConnectUsb.IsEnabled = _usbDeviceId != null && !_studio.UsbSessionActive; }
+        finally { _usbConnecting = false; ConnectUsb.IsEnabled = _usbReady && _usbDeviceId != null && !_studio.UsbSessionActive; }
     }
 
     private void Diagnose_Click(object sender, RoutedEventArgs e)
@@ -92,6 +94,21 @@ public partial class ConnectPhoneWindow : Window
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void InstallUsbDriver_Click(object sender, RoutedEventArgs e)
+    {
+        string driverTool = Path.Combine(AppContext.BaseDirectory, "usb", "iPhoneMirror.Driver.exe");
+        if (!File.Exists(driverTool))
+        {
+            MessageBox.Show(this, "The USB driver manager is not included in this build. Rebuild using the repository Windows workflow.", "USB driver setup", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        try { Process.Start(new ProcessStartInfo(driverTool) { UseShellExecute = true }); }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            MessageBox.Show(this, ex.Message, "USB driver setup", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
 
     private void GetAppleDevices_Click(object sender, RoutedEventArgs e)
     {

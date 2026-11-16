@@ -1,27 +1,70 @@
-# Direct USB QuickTime host (separate GPL component)
+# Direct USB capture host
 
-SMAET REC remains MIT-licensed. The USB QuickTime implementation is kept as a separate executable/process so GPL source and its obligations do not silently become part of the MIT application.
+SMAET REC's MIT WPF application starts a separate GPL-3.0-only native host.
+The GPL engine and adapter are not loaded into the MIT process; media crosses
+only a private Windows named pipe. The host source is under `usb-host/` and
+the pinned upstream source is the `third_party/iphone-usb-host` submodule.
 
-## Upstream source
+## Runtime and device selection
 
-`third_party/iphone-usb-host` is a Git submodule pointing to RayrenSX/iPhoneMirror, pinned to a specific upstream commit. That project is GPL-3.0. Keep its source, notices, build system and resulting executable separately identifiable. Do not copy its source into `src/SmaetRec.*` or relabel it MIT.
+The application starts `usb/iphone-usb-host.exe` with:
 
-The application-side IPC adapter is original SMAET REC code under the repository MIT license.
+```text
+--smaet-ipc --pipe <pipe-name> --device-serial <Windows-USB-serial> --video bgra8
+```
 
-## SMAET adapter IPC contract v2 (decoded frames)
+The adapter enumerates devices through `im_refresh_devices_ex`, matches the
+selected serial to exactly one attached device, and passes the authoritative
+usbmux UDID to `im_session_create`. Ambiguous or missing matches fail closed.
+It forwards decoded BGRA8 frames from the upstream C ABI.
 
-The helper is expected at `resources/usb/iphone-usb-host.exe` and is launched with `--smaet-ipc --pipe <pipe-name> --device-serial <USB-serial> --video bgra8`. The adapter resolves the selected physical USB serial to the authoritative usbmux UDID using the upstream Core API; the Windows PnP instance-id suffix is not treated as a UDID.
+## IPC v2 framing
 
-Each record consists of a 4-byte unsigned little-endian total length, then a 4-byte unsigned little-endian JSON-header length, then that many UTF-8 JSON bytes, then the optional binary payload. Status: `{"type":"status","message":"..."}`. Error: `{"type":"error","message":"..."}`. End: `{"type":"stopped"}`.
+Each record is:
 
-Video record JSON fields: `type=video`, `pixelFormat=bgra8`, `width`, `height`, `stride`, `payloadBytes`, and `timestamp100ns`. After the JSON header, exactly payloadBytes of tightly packed top-down BGRA8 pixels follow (`stride = width * 4`). The upstream Core API supplies decoded BGRA/NV12 frames, not H.264 access units.
+1. 4-byte unsigned little-endian record length (bytes after this prefix)
+2. 4-byte unsigned little-endian UTF-8 JSON header length
+3. UTF-8 JSON header
+4. optional binary payload
 
-The host must emit video only after the upstream capture session reaches Streaming and a decoded frame is available. Opening a USB handle is not streaming. Preserve the upstream 100-ns frame timestamp. Validate dimensions, stride, pixel format and payload bounds before forwarding. No simulated frames are permitted.
+Records:
 
-## Native host status
+- Status: `{"type":"status","message":"..."}`
+- Error: `{"type":"error","message":"..."}`
+- Video: `{"type":"video","pixelFormat":"bgra8","width":1920,"height":1080,"stride":7680,"payloadBytes":8294400,"timestamp100ns":123456}` followed by tightly packed BGRA8 bytes
+- Stop: `{"type":"stopped"}`
 
-The upstream repository is linked as a separate GPL submodule; it is not yet an SMAET-specific host executable. A dedicated GPL adapter/launcher must be built against the pinned upstream C ABI and emit IPC v2 before USB capture can be considered functional. The app-side reader now expects decoded BGRA frames and submits them directly to MemoryFrameSource; it no longer treats upstream decoded pixels as H.264. The app intentionally fails clearly when the helper is missing; it never falls back to AirPlay, Wi-Fi, or fake video.
+The payload size equals `stride * height`; stride equals `width * 4`.
+Maximum record size is 64 MiB. The host validates dimensions and repacks
+padded native rows before sending.
 
-## Driver safety
+## Build and package
 
-USB driver/filter setup must be opt-in, per-device, signature/hash verified and reversible. Do not disable driver-signature enforcement or Memory Integrity, and do not globally replace Apple's USB stack.
+On Windows 10/11 x64 with Visual Studio 2022 and CMake 3.25+:
+
+```powershell
+git submodule update --init --recursive
+cmake -S usb-host -B build/usb-host -A x64
+cmake --build build/usb-host --config Release --target iphone-usb-host
+```
+
+CI builds the native engine and adapter, stages the runtime in
+`src/SmaetRec.App/usb`, runs managed tests, and publishes the
+self-contained application. The release package also carries the GPL license,
+notices, and corresponding source archive.
+
+## Requirements
+
+- Windows 10/11 x64.
+- Apple Devices or desktop iTunes with Apple Mobile Device Support installed.
+- Data-capable USB cable; iPhone unlocked; accept “Trust This Computer”.
+- Upstream-compatible Apple USB capture interface and libusb0 filter driver
+  where required. The “USB driver setup / repair” button opens the upstream
+  standalone driver manager (administrator consent may be requested). The
+  upstream engine's configuration helper is packaged beside the host. Driver
+  installation remains a separate privileged action;
+  do not use Zadig to replace the Apple parent device driver or disable
+  Windows driver-signature enforcement.
+
+No fake frames or AirPlay fallback are used by the USB path. A real-device
+acceptance test is required before claiming hardware compatibility.

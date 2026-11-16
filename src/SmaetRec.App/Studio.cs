@@ -101,9 +101,10 @@ public sealed class Studio : IDisposable
     {
         // iPhoneMirror's GPL Core API already decodes QuickTime FEED samples to
         // BGRA. Forward decoded pixels directly; do not pretend they are H.264.
+        bool becameStreaming = !_usbStreaming;
         _usbStreaming = true;
         Engine.PhoneFrames.Submit(bgra, width, height);
-        PhoneStateChanged?.Invoke();
+        if (becameStreaming) PhoneStateChanged?.Invoke();
     }
 
     private void OnVideoPacket(VideoPacket packet)
@@ -148,12 +149,12 @@ public sealed class Studio : IDisposable
             H264Decoder? old;
             lock (_decoderLock) { old = _decoder; _decoder = null; _firstPacketTimestamp = null; _lastPacketPts = -1; }
             old?.Dispose();
-            if (_usbClient == null && !Engine.PhoneFrames.IsSimulated) Engine.PhoneFrames.Clear();
+            if (!UsbSessionActive && !Engine.PhoneFrames.IsSimulated) Engine.PhoneFrames.Clear();
         }
         PhoneStateChanged?.Invoke();
     }
 
-    public bool UsbSessionActive => _usbClient != null;
+    public bool UsbSessionActive => _usbClient?.IsActive == true;
     public bool UsbConnected => _usbStreaming;
     public bool PhoneConnected => Receiver.State == ReceiverState.Connected || UsbConnected || Engine.PhoneFrames.IsSimulated;
 

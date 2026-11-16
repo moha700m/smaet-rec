@@ -16,6 +16,9 @@ public sealed class DirectUsbCaptureClient : IAsyncDisposable
     private CancellationTokenSource? _stop;
     private Task? _reader;
     private int _started;
+    private int _pipeConnected;
+
+    public bool IsActive => Volatile.Read(ref _started) != 0 && Volatile.Read(ref _pipeConnected) != 0;
 
     public event Action<byte[], int, int, long>? VideoFrame;
     public event Action<string>? Status;
@@ -26,18 +29,39 @@ public sealed class DirectUsbCaptureClient : IAsyncDisposable
 
     public async Task StartAsync(string usbSerial, CancellationToken cancellationToken = default)
     {
-        if (Interlocked.Exchange(ref _started, 1) != 0) throw new InvalidOperationException("USB capture is already started.");
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Direct USB capture is Windows-only.");
-        if (string.IsNullOrWhiteSpace(usbSerial) || usbSerial.Length > 128 || usbSerial.Any(char.IsControl)) throw new ArgumentException("A valid Apple UDID is required.", nameof(usbSerial));
-        string exe = Path.Combine(_resourceDirectory, "usb", "iphone-usb-host.exe");
-        if (!File.Exists(exe)) { Interlocked.Exchange(ref _started, 0); throw new FileNotFoundException("The separately licensed USB host is not installed. See docs/direct-usb-host.md.", exe); }
-        _stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _pipe = new NamedPipeServerStream(_pipeName, PipeDirection.In, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 1024 * 1024, 1024 * 1024);
-        var psi = new ProcessStartInfo(exe) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(exe)! };
-        foreach (var arg in new[] { "--smaet-ipc", "--pipe", _pipeName, "--device-serial", usbSerial, "--video", "bgra8" }) psi.ArgumentList.Add(arg);
-        _host = Process.Start(psi) ?? throw new InvalidOperationException("Could not start USB host.");
-        try { await _pipe.WaitForConnectionAsync(_stop.Token).ConfigureAwait(false); Status?.Invoke("USB host IPC connected; waiting for QuickTime video."); _reader = ReadLoopAsync(_pipe, _stop.Token); }
-        catch { await StopAsync().ConfigureAwait(false); throw; }
+        if (string.IsNullOrWhiteSpace(usbSerial) || usbSerial.Length > 128 || usbSerial.Any(char.IsControl)) throw new ArgumentException("A valid Apple USB serial is required.", nameof(usbSerial));
+        if (Interlocked.Exchange(ref _started, 1) != 0) throw new InvalidOperationException("USB capture is already started.");
+        try
+        {
+            string exe = Path.Combine(_resourceDirectory, "usb", "iphone-usb-host.exe");
+            if (!File.Exists(exe)) throw new FileNotFoundException("The separately licensed USB host is not installed. See docs/direct-usb-host.md.", exe);
+            _stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            _pipe = new NamedPipeServerStream(_pipeName, PipeDirection.In, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 1024 * 1024, 1024 * 1024);
+            var psi = new ProcessStartInfo(exe) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(exe)! };
+            foreach (var arg in new[] { "--smaet-ipc", "--pipe", _pipeName, "--device-serial", usbSerial, "--video", "bgra8" }) psi.ArgumentList.Add(arg);
+            _host = Process.Start(psi) ?? throw new InvalidOperationException("Could not start USB host.");
+
+            var connection = _pipe.WaitForConnectionAsync(_stop.Token);
+            var exited = _host.WaitForExitAsync();
+            var timeout = Task.Delay(TimeSpan.FromSeconds(25));
+            var completed = await Task.WhenAny(connection, exited, timeout).ConfigureAwait(false);
+            if (completed == exited)
+            {
+                await exited.ConfigureAwait(false);
+                throw new IOException($"USB host exited before opening IPC (exit code {_host.ExitCode}).");
+            }
+            if (completed == timeout) throw new TimeoutException("USB host did not connect to the IPC pipe within 25 seconds.");
+            await connection.ConfigureAwait(false);
+            Volatile.Write(ref _pipeConnected, 1);
+            Status?.Invoke("USB host IPC connected; waiting for QuickTime video.");
+            _reader = ReadLoopAsync(_pipe, _stop.Token);
+        }
+        catch
+        {
+            await StopAsync().ConfigureAwait(false);
+            throw;
+        }
     }
 
     private async Task ReadLoopAsync(Stream stream, CancellationToken token)
@@ -83,9 +107,9 @@ public sealed class DirectUsbCaptureClient : IAsyncDisposable
             }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
-        catch (EndOfStreamException) { }
-        catch (Exception e) when (e is IOException or InvalidDataException or JsonException or KeyNotFoundException) { Failed?.Invoke(e.Message); }
-        finally { Disconnected?.Invoke(); }
+        catch (EndOfStreamException e) when (!token.IsCancellationRequested) { Failed?.Invoke(e.Message); }
+        catch (Exception e) when (e is IOException or InvalidDataException or JsonException or KeyNotFoundException or OverflowException or InvalidOperationException) { Failed?.Invoke(e.Message); }
+        finally { Volatile.Write(ref _pipeConnected, 0); Disconnected?.Invoke(); }
     }
 
     private static async Task ReadExactlyAsync(Stream stream, Memory<byte> buffer, CancellationToken token)
@@ -97,8 +121,13 @@ public sealed class DirectUsbCaptureClient : IAsyncDisposable
     public async Task StopAsync()
     {
         _stop?.Cancel();
-        if (_reader != null) { try { await _reader.ConfigureAwait(false); } catch (OperationCanceledException) { } }
-        if (_host is { HasExited: false }) { try { if (!_host.WaitForExit(3000)) _host.Kill(entireProcessTree: true); } catch (InvalidOperationException) { } }
+        if (_reader != null) { try { await _reader.ConfigureAwait(false); } catch (OperationCanceledException) { } catch (Exception e) when (e is IOException or InvalidDataException or JsonException) { } }
+        if (_host != null)
+        {
+            try { if (!_host.HasExited && !_host.WaitForExit(3000)) _host.Kill(entireProcessTree: true); }
+            catch (InvalidOperationException) { }
+            catch (System.ComponentModel.Win32Exception) { }
+        }
         _host?.Dispose(); _host = null; _pipe?.Dispose(); _pipe = null; _stop?.Dispose(); _stop = null;
         Interlocked.Exchange(ref _started, 0);
     }
