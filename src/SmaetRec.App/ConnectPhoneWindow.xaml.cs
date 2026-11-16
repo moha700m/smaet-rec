@@ -65,7 +65,7 @@ public partial class ConnectPhoneWindow : Window
             Set(UsbPhone, UsbPhoneDot, usb.PhonePluggedIn, Loc.T(usb.PhonePluggedIn ? "UsbPhoneFound" : "UsbPhoneMissing"));
             Set(UsbDriver, UsbDriverDot, usb.AppleUsbDriverInstalled, Loc.T(usb.AppleUsbDriverInstalled ? "UsbDriverFound" : "UsbDriverMissing"));
             Set(UsbService, UsbServiceDot, usb.AppleMobileDeviceServiceRunning, Loc.T(usb.AppleMobileDeviceServiceRunning ? "UsbServiceRunning" : "UsbServiceStopped"));
-            Set(UsbParent, UsbParentDot, usb.ParentCompositeDriverReady,
+            Set(UsbParent, UsbParentDot, usb.PhonePluggedIn && usb.ParentCompositeDriverReady,
                 Loc.T(!usb.PhonePluggedIn ? "UsbParentNoPhone" : usb.ParentCompositeDriverReady ? "UsbParentReady" : "UsbParentWrong", usb.ParentDriverService ?? "unknown"));
             GetAppleDevices.Visibility = usb.AppleUsbDriverInstalled ? Visibility.Collapsed : Visibility.Visible;
         }
