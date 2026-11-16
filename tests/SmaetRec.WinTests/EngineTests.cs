@@ -289,7 +289,12 @@ public class EngineTests(ITestOutputHelper output)
     {
         var status = UsbPhoneDetector.Check();
         output.WriteLine(status.ToString());
-        if (status.NetworkAddress != null) Assert.True(status.AppleDriverInstalled);
-        Assert.Equal(status.PhonePluggedIn && status.AppleDriverInstalled && status.NetworkAddress != null, status.Ready);
+        Assert.Equal(status.PhonePluggedIn, status.Ready);
+        Assert.Equal(status.AppleUsbDriverInstalled && !status.HasAppleMuxConflict &&
+            (status.AppleMuxAvailable ||
+             (status.AppleMobileDeviceServiceInstalled && status.AppleMobileDeviceServiceRunning)),
+            status.AppleSupportInstalled);
+        Assert.True(status.ParentCompositeDriverReady || status.PhonePluggedIn);
+        Assert.InRange(status.AppleMuxListener?.Length ?? 0, 0, 260);
     }
 }

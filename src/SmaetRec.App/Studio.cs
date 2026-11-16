@@ -16,6 +16,7 @@ public sealed class Studio : IDisposable
     private System.Threading.Timer? _autosave;
     private DirectUsbCaptureClient? _usbClient;
     private volatile bool _usbStreaming;
+    private volatile string _usbStatus = "USB is idle.";
 
     public AppSettings Settings { get; }
     public Scene Scene { get; } = new();
@@ -76,14 +77,37 @@ public sealed class Studio : IDisposable
     public async Task ConnectUsbAsync(string usbSerial, CancellationToken cancellationToken = default)
     {
         await StopUsbAsync().ConfigureAwait(false);
+        _usbStatus = "Starting the native USB capture host.";
         var client = new DirectUsbCaptureClient(AppContext.BaseDirectory);
         client.VideoFrame += OnDirectUsbFrame;
-        client.Status += message => Log.Write("USB: " + message);
-        client.Failed += message => { Log.Write("USB error: " + message); PhoneStateChanged?.Invoke(); };
-        client.Disconnected += () => { _usbStreaming = false; PhoneStateChanged?.Invoke(); };
+        client.Status += message =>
+        {
+            _usbStatus = message;
+            Log.Write("USB: " + message);
+            PhoneStateChanged?.Invoke();
+        };
+        client.Failed += message =>
+        {
+            _usbStatus = "USB error: " + message;
+            Log.Write(_usbStatus);
+            PhoneStateChanged?.Invoke();
+        };
+        client.Disconnected += () =>
+        {
+            _usbStreaming = false;
+            if (!_usbStatus.StartsWith("USB error:", StringComparison.Ordinal))
+                _usbStatus = "USB capture disconnected.";
+            PhoneStateChanged?.Invoke();
+        };
         _usbClient = client;
         try { await client.StartAsync(usbSerial, cancellationToken).ConfigureAwait(false); }
-        catch { _usbClient = null; await client.DisposeAsync().ConfigureAwait(false); throw; }
+        catch (Exception ex)
+        {
+            _usbStatus = "USB startup failed: " + ex.Message;
+            _usbClient = null;
+            await client.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
         PhoneStateChanged?.Invoke();
     }
 
@@ -92,6 +116,7 @@ public sealed class Studio : IDisposable
         var client = _usbClient;
         _usbClient = null;
         _usbStreaming = false;
+        _usbStatus = "USB capture stopped.";
         if (client != null) await client.DisposeAsync().ConfigureAwait(false);
         if (Receiver.State != ReceiverState.Connected && !Engine.PhoneFrames.IsSimulated) Engine.PhoneFrames.Clear();
         PhoneStateChanged?.Invoke();
@@ -103,6 +128,7 @@ public sealed class Studio : IDisposable
         // BGRA. Forward decoded pixels directly; do not pretend they are H.264.
         bool becameStreaming = !_usbStreaming;
         _usbStreaming = true;
+        _usbStatus = "USB video is live.";
         Engine.PhoneFrames.Submit(bgra, width, height);
         if (becameStreaming) PhoneStateChanged?.Invoke();
     }
@@ -155,6 +181,7 @@ public sealed class Studio : IDisposable
     }
 
     public bool UsbSessionActive => _usbClient?.IsActive == true;
+    public string UsbStatus => _usbStatus;
     public bool UsbConnected => _usbStreaming;
     public bool PhoneConnected => Receiver.State == ReceiverState.Connected || UsbConnected || Engine.PhoneFrames.IsSimulated;
 

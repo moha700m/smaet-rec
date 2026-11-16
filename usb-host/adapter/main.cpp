@@ -9,6 +9,8 @@
 #include <iPhoneMirror/CoreApi.h>
 
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
@@ -119,29 +121,58 @@ bool ConnectPipe(const std::wstring& name) {
     return false;
 }
 
-bool FindDevice(const std::wstring& requested, std::wstring& udid) {
+bool FindDevice(const std::wstring& requested, std::wstring& udid,
+                std::wstring& error) {
     std::uint32_t count = 0;
-    auto result = im_refresh_devices_ex(nullptr, &count, 1);
-    if (result != static_cast<std::int32_t>(iPhoneMirror::Result::Ok) &&
-        result != static_cast<std::int32_t>(iPhoneMirror::Result::BufferTooSmall)) return false;
-    if (count == 0 || count > 128) return false;
+    // Metadata/Lockdown refresh is not needed to resolve the already-enumerated USB UDID.
+    // Avoid a second pairing round-trip before QuickTime capture begins.
+    auto result = im_refresh_devices_ex(nullptr, &count, 0);
+    if (result != static_cast<std::int32_t>(iPhoneMirror::Result::Ok)) {
+        const wchar_t* detail = im_last_error();
+        error = detail && *detail ? detail : L"Apple usbmux device discovery failed.";
+        return false;
+    }
+    if (count == 0) {
+        error = L"Apple usbmux did not report a connected iPhone. Unlock it, accept Trust This Computer, and reconnect USB.";
+        return false;
+    }
+    if (count > 128) {
+        error = L"Apple usbmux reported an unexpected number of connected devices.";
+        return false;
+    }
     std::vector<iPhoneMirror::DeviceInfo> devices(count);
-    for (auto& d : devices) { std::memset(&d, 0, sizeof(d)); d.struct_size = sizeof(d); d.api_version = iPhoneMirror::ApiVersion; }
-    result = im_refresh_devices_ex(devices.data(), &count, 1);
-    if (result != static_cast<std::int32_t>(iPhoneMirror::Result::Ok)) return false;
+    for (auto& d : devices) {
+        std::memset(&d, 0, sizeof(d));
+        d.struct_size = sizeof(d);
+        d.api_version = iPhoneMirror::ApiVersion;
+    }
+    result = im_refresh_devices_ex(devices.data(), &count, 0);
+    if (result != static_cast<std::int32_t>(iPhoneMirror::Result::Ok)) {
+        const wchar_t* detail = im_last_error();
+        error = detail && *detail ? detail : L"Could not read the Apple USB device list.";
+        return false;
+    }
 
     const auto wanted = Normalize(requested);
+    if (wanted.empty()) {
+        error = L"Windows did not provide a usable Apple USB device serial.";
+        return false;
+    }
     std::vector<std::wstring> matches;
     for (const auto& d : devices) {
         if (!d.usb_connected || d.udid[0] == L'\0') continue;
+        // The Windows PnP serial and usbmux UDID must identify the same
+        // physical phone. Partial/suffix matching can select another device
+        // and will fail the capture engine's own exact-serial preflight.
         const std::wstring candidate(d.udid);
-        const auto normalized = Normalize(candidate);
-        const bool exact = normalized == wanted;
-        const bool suffix = wanted.size() >= 16 && normalized.size() >= 16 &&
-            (normalized.ends_with(wanted) || wanted.ends_with(normalized));
-        if (exact || suffix) matches.push_back(candidate);
+        if (Normalize(candidate) == wanted) matches.push_back(candidate);
     }
-    if (matches.size() != 1) return false;
+    if (matches.size() != 1) {
+        error = matches.empty()
+            ? L"No exact USB serial match was found in Apple usbmux. Unlock the iPhone, tap Trust This Computer, and reconnect the cable. Do not connect multiple Apple devices while selecting the phone."
+            : L"More than one Apple usbmux device matched the selected USB serial; refusing an ambiguous connection.";
+        return false;
+    }
     udid = matches.front();
     return true;
 }
@@ -149,6 +180,7 @@ bool FindDevice(const std::wstring& requested, std::wstring& udid) {
 int Run(const std::wstring& pipeName, const std::wstring& requestedSerial) {
     if (pipeName.empty() || requestedSerial.empty()) return 2;
     if (!ConnectPipe(pipeName)) return 3;
+    SendStatus(L"USB host started; checking the iPhone capture engine.");
     if (im_api_version() != iPhoneMirror::ApiVersion) {
         SendError(L"iPhoneMirror Core API version mismatch.");
         return 4;
@@ -160,14 +192,15 @@ int Run(const std::wstring& pipeName, const std::wstring& requestedSerial) {
         return 5;
     }
 
+    SendStatus(L"Apple capture engine initialized; discovering the trusted USB device.");
     int exitCode = 0;
-    iPhoneMirror::SessionHandle session = 0;
-    bool sessionCreated = false;
     std::wstring udid;
-    if (!FindDevice(requestedSerial, udid)) {
-        SendError(L"Connected Apple device could not be matched to the selected USB serial. Unlock the iPhone and trust this computer.");
+    std::wstring deviceError;
+    if (!FindDevice(requestedSerial, udid, deviceError)) {
+        SendError(deviceError.empty() ? L"Connected Apple device could not be matched to the selected USB serial." : deviceError);
         exitCode = 6;
     } else {
+        SendStatus(L"iPhone matched through Apple usbmux; starting QuickTime USB handshake.");
         iPhoneMirror::CaptureOptions options{};
         options.struct_size = sizeof(options);
         options.api_version = iPhoneMirror::ApiVersion;
@@ -177,36 +210,104 @@ int Run(const std::wstring& pipeName, const std::wstring& requestedSerial) {
         options.play_audio = 0;
         options.audio_volume = 0.0f;
 
-        const auto create = im_session_create(udid.c_str(), &options, &session);
-        if (create != static_cast<std::int32_t>(iPhoneMirror::Result::Ok)) {
-            const wchar_t* detail = im_last_error();
-            SendError(detail && *detail ? detail : L"Could not create the iPhone QuickTime USB capture session. Check Apple device support, trust pairing and USB driver setup.");
-            exitCode = 7;
-        } else {
-            sessionCreated = true;
-            SendStatus(L"iPhone USB session created; waiting for decoded video frames.");
+        // iPhoneMirror supports three QuickTime projection handshakes. A phone/iOS
+        // combination may reject one mode but work with another, so try them in
+        // order while there is no first video frame. Each attempt is bounded so
+        // the managed client's overall first-frame watchdog still has headroom.
+        constexpr std::array<std::uint32_t, 3> projectionModes{0, 1, 2};
+        constexpr std::array<const wchar_t*, 3> projectionNames{
+            L"A (Demo)", L"B (AirPlay compatibility)", L"C (Aisi compatibility)"
+        };
+        constexpr auto firstFrameTimeout = std::chrono::seconds(13);
+        bool terminalFailure = false;
+
+        for (std::size_t modeIndex = 0;
+             modeIndex < projectionModes.size() && g_running.load() && !terminalFailure;
+             ++modeIndex) {
+            options.reserved[2] = projectionModes[modeIndex];
+            SendStatus(std::wstring(L"Trying USB projection mode ") +
+                projectionNames[modeIndex] + L". Keep the iPhone unlocked.");
+
+            iPhoneMirror::SessionHandle currentSession = 0;
+            const auto create = im_session_create(udid.c_str(), &options, &currentSession);
+            if (create != static_cast<std::int32_t>(iPhoneMirror::Result::Ok)) {
+                const wchar_t* detail = im_last_error();
+                SendError(detail && *detail ? detail :
+                    L"Could not create the iPhone QuickTime USB capture session. Check Apple USB support and the per-device capture driver.");
+                exitCode = 7;
+                terminalFailure = true;
+                break;
+            }
+
+            const auto attemptStarted = std::chrono::steady_clock::now();
             std::int64_t lastTimestamp = 0;
-            bool announcedStreaming = false;
+            bool firstFrameReceived = false;
+            bool retryWithNextMode = false;
+            int lastAnnouncedState = -1;
+
             while (g_running.load()) {
                 iPhoneMirror::CaptureStatus status{};
                 status.struct_size = sizeof(status);
                 status.api_version = iPhoneMirror::ApiVersion;
-                const auto statusResult = im_session_get_status(session, &status);
+                const auto statusResult = im_session_get_status(currentSession, &status);
                 if (statusResult != static_cast<std::int32_t>(iPhoneMirror::Result::Ok)) {
                     const wchar_t* detail = im_last_error();
                     SendError(detail && *detail ? detail : L"Could not read iPhone capture status.");
                     exitCode = 8;
+                    terminalFailure = true;
                     break;
                 }
+
+                const int stateValue = static_cast<int>(status.state);
+                if (stateValue != lastAnnouncedState) {
+                    std::wstring stage;
+                    switch (status.state) {
+                    case iPhoneMirror::CaptureState::ActivatingUsb: stage = L"Activating the Apple USB capture configuration."; break;
+                    case iPhoneMirror::CaptureState::WaitingForDevice: stage = L"Waiting for the iPhone USB interface to re-enumerate."; break;
+                    case iPhoneMirror::CaptureState::Handshaking: stage = L"Negotiating the iPhone QuickTime video stream."; break;
+                    case iPhoneMirror::CaptureState::Streaming: stage = L"iPhone video stream is active."; break;
+                    case iPhoneMirror::CaptureState::Stopping: stage = L"Stopping the iPhone USB capture session."; break;
+                    case iPhoneMirror::CaptureState::Stopped: stage = L"iPhone USB capture session stopped."; break;
+                    default: stage = L"Preparing the iPhone USB video stream."; break;
+                    }
+                    if (status.message[0] != L'\0') stage += L" " + std::wstring(status.message);
+                    SendStatus(stage);
+                    lastAnnouncedState = stateValue;
+                }
+
                 if (status.state == iPhoneMirror::CaptureState::Error) {
-                    SendError(status.message[0] ? status.message : L"iPhone USB capture failed.");
-                    exitCode = 9;
+                    const bool handshakeFailure =
+                        status.failure_stage == iPhoneMirror::CaptureFailureStage::QuickTimeHandshake ||
+                        status.failure_stage == iPhoneMirror::CaptureFailureStage::VideoStream ||
+                        status.failure_stage == iPhoneMirror::CaptureFailureStage::Decoder;
+                    if (!firstFrameReceived && handshakeFailure &&
+                        modeIndex + 1 < projectionModes.size()) {
+                        SendStatus(std::wstring(L"Mode ") + projectionNames[modeIndex] +
+                            L" did not produce a video stream; trying the next USB compatibility mode.");
+                        retryWithNextMode = true;
+                    } else {
+                        SendError(status.message[0] != L'\0' ? status.message :
+                            L"iPhone USB capture failed before a usable video stream was established.");
+                        exitCode = 9;
+                        terminalFailure = true;
+                    }
                     break;
                 }
-                if (status.state == iPhoneMirror::CaptureState::Stopped) break;
+                if (status.state == iPhoneMirror::CaptureState::Stopped) {
+                    if (!firstFrameReceived && modeIndex + 1 < projectionModes.size()) {
+                        SendStatus(std::wstring(L"Mode ") + projectionNames[modeIndex] +
+                            L" stopped before the first frame; trying the next USB compatibility mode.");
+                        retryWithNextMode = true;
+                    } else if (!firstFrameReceived) {
+                        SendError(L"iPhone USB capture stopped without producing a video frame.");
+                        exitCode = 10;
+                        terminalFailure = true;
+                    }
+                    break;
+                }
 
                 std::int64_t timestamp = 0;
-                if (im_session_get_latest_video_timestamp(session, &timestamp) ==
+                if (im_session_get_latest_video_timestamp(currentSession, &timestamp) ==
                         static_cast<std::int32_t>(iPhoneMirror::Result::Ok) &&
                     timestamp > lastTimestamp) {
                     iPhoneMirror::VideoFrameInfo info{};
@@ -214,7 +315,7 @@ int Run(const std::wstring& pipeName, const std::wstring& requestedSerial) {
                     info.api_version = iPhoneMirror::ApiVersion;
                     std::uint32_t capacity = 0;
                     auto copyResult = im_session_copy_latest_video_frame(
-                        session, &info, nullptr, &capacity, 0, 0);
+                        currentSession, &info, nullptr, &capacity, 0, 0);
                     if (copyResult == static_cast<std::int32_t>(iPhoneMirror::Result::BufferTooSmall) &&
                         capacity > 0 && capacity <= kMaxFrameBytes) {
                         std::vector<std::uint8_t> source(capacity);
@@ -222,7 +323,7 @@ int Run(const std::wstring& pipeName, const std::wstring& requestedSerial) {
                         info.struct_size = sizeof(info);
                         info.api_version = iPhoneMirror::ApiVersion;
                         copyResult = im_session_copy_latest_video_frame(
-                            session, &info, source.data(), &capacity, 0, 0);
+                            currentSession, &info, source.data(), &capacity, 0, 0);
                         if (copyResult == static_cast<std::int32_t>(iPhoneMirror::Result::Ok) &&
                             info.width > 0 && info.height > 0 &&
                             info.width <= 8192 && info.height <= 8192 &&
@@ -249,23 +350,46 @@ int Run(const std::wstring& pipeName, const std::wstring& requestedSerial) {
                                     break;
                                 }
                                 lastTimestamp = info.timestamp_100ns;
-                                if (!announcedStreaming) {
-                                    SendStatus(L"iPhone USB video is live.");
-                                    announcedStreaming = true;
+                                if (!firstFrameReceived) {
+                                    firstFrameReceived = true;
+                                    SendStatus(std::wstring(L"iPhone USB video is live using mode ") +
+                                        projectionNames[modeIndex] + L".");
                                 }
                             }
                         }
                     }
                 }
+
+                if (!firstFrameReceived &&
+                    std::chrono::steady_clock::now() - attemptStarted >= firstFrameTimeout) {
+                    if (modeIndex + 1 < projectionModes.size()) {
+                        SendStatus(std::wstring(L"No first video frame in mode ") +
+                            projectionNames[modeIndex] +
+                            L"; switching to the next USB compatibility mode.");
+                        retryWithNextMode = true;
+                    } else {
+                        SendError(L"No video frame arrived in any USB compatibility mode. Check Apple Mobile Device Service and the iPhone USB capture filter.");
+                        exitCode = 10;
+                        terminalFailure = true;
+                    }
+                    break;
+                }
                 Sleep(5);
             }
+
+            im_session_stop(currentSession);
+            im_session_destroy(currentSession);
+
+            // Once a real frame is received this session owns the USB device;
+            // keep it alive until the caller stops capture or the stream fails.
+            if (firstFrameReceived || !retryWithNextMode || terminalFailure || !g_running.load())
+                break;
+
+            SendStatus(L"Resetting the iPhone USB session before the next compatibility mode.");
+            Sleep(1200);
         }
     }
 
-    if (sessionCreated) {
-        im_session_stop(session);
-        im_session_destroy(session);
-    }
     im_shutdown();
     SendRecord("{\"type\":\"stopped\"}");
     return exitCode;
