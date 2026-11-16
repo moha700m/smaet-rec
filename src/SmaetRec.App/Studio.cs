@@ -15,6 +15,7 @@ public sealed class Studio : IDisposable
     private long _lastPacketPts = -1;
     private System.Threading.Timer? _autosave;
     private DirectUsbCaptureClient? _usbClient;
+    private volatile bool _usbStreaming;
 
     public AppSettings Settings { get; }
     public Scene Scene { get; } = new();
@@ -79,7 +80,7 @@ public sealed class Studio : IDisposable
         client.VideoAccessUnit += OnDirectUsbVideo;
         client.Status += message => Log.Write("USB: " + message);
         client.Failed += message => { Log.Write("USB error: " + message); PhoneStateChanged?.Invoke(); };
-        client.Disconnected += () => PhoneStateChanged?.Invoke();
+        client.Disconnected += () => { _usbStreaming = false; PhoneStateChanged?.Invoke(); };
         _usbClient = client;
         try { await client.StartAsync(udid, cancellationToken).ConfigureAwait(false); }
         catch { _usbClient = null; await client.DisposeAsync().ConfigureAwait(false); throw; }
@@ -90,12 +91,15 @@ public sealed class Studio : IDisposable
     {
         var client = _usbClient;
         _usbClient = null;
+        _usbStreaming = false;
         if (client != null) await client.DisposeAsync().ConfigureAwait(false);
         PhoneStateChanged?.Invoke();
     }
 
     private void OnDirectUsbVideo(byte[] data, long timestampMicros, bool keyFrame)
     {
+        _usbStreaming = true;
+        PhoneStateChanged?.Invoke();
         lock (_decoderLock)
         {
             _decoder ??= new H264Decoder(Engine.PhoneFrames);
@@ -154,7 +158,7 @@ public sealed class Studio : IDisposable
         PhoneStateChanged?.Invoke();
     }
 
-    public bool UsbConnected => _usbClient != null;
+    public bool UsbConnected => _usbStreaming;
     public bool PhoneConnected => Receiver.State == ReceiverState.Connected || UsbConnected || Engine.PhoneFrames.IsSimulated;
 
     /// <summary>Pictures the Windows decoder has produced for the current iPhone session.</summary>
