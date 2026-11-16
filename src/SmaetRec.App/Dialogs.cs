@@ -48,59 +48,101 @@ public sealed class TextEntryWindow : Window
 }
 
 /// <summary>"What do you want to show?" — whole screens as big buttons, then a list of open windows.</summary>
-public sealed class ScreenPickerWindow : Window
+public sealed internal sealed class ScreenPickerWindow : Window
 {
     public CaptureTarget? Selected { get; private set; }
     public bool HideRequested { get; private set; }
 
-    public ScreenPickerWindow(bool screenActive)
+    public ScreenPickerWindow(bool screenActive, bool windowsOnly = false,
+        string? dialogTitle = null, string? instructions = null)
     {
         DialogSetup.Apply(this);
-        Title = Loc.T("PickScreenTitle");
+        Title = dialogTitle ?? Loc.T("PickScreenTitle");
         Width = 560;
         SizeToContent = SizeToContent.Height;
         var subtle = (Brush)FindResource("SubtleBrush");
         var root = new StackPanel { Margin = new Thickness(22) };
-        root.Children.Add(new TextBlock { Text = Loc.T("PickScreenTitle"), FontSize = 20, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 14) });
-
-        var monitors = new WrapPanel();
-        int n = 1;
-        foreach (var monitor in CaptureTarget.Monitors())
+        root.Children.Add(new TextBlock
         {
-            var button = new Button
+            Text = dialogTitle ?? Loc.T("PickScreenTitle"),
+            FontSize = 20,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 0, 0, 10),
+            TextWrapping = TextWrapping.Wrap,
+        });
+        if (!string.IsNullOrWhiteSpace(instructions))
+            root.Children.Add(new TextBlock
             {
-                Style = (Style)FindResource("BigButton"), MinWidth = 150, Height = 92, Margin = new Thickness(0, 0, 10, 10),
-                Content = monitor.IsPrimary ? Loc.T("WholeScreen") : Loc.T("ScreenN", n),
-                ToolTip = $"{monitor.Width} × {monitor.Height}",
-            };
-            Ui.SetGlyph(button, "");
-            button.Click += (_, _) => { Selected = monitor; DialogResult = true; };
-            monitors.Children.Add(button);
-            n++;
-        }
-        root.Children.Add(monitors);
+                Text = instructions,
+                Foreground = subtle,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 12),
+            });
 
-        var windows = CaptureTarget.Windows();
-        if (windows.Count > 0)
+        if (!windowsOnly)
         {
-            root.Children.Add(new TextBlock { Text = Loc.T("Windows"), Foreground = subtle, Margin = new Thickness(0, 8, 0, 8) });
-            var list = new StackPanel();
-            foreach (var w in windows.Take(40))
+            var monitors = new WrapPanel();
+            int n = 1;
+            foreach (var monitor in CaptureTarget.Monitors())
             {
                 var button = new Button
                 {
-                    Style = (Style)FindResource("PlainButton"), HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                    Margin = new Thickness(0, 0, 0, 6), Content = w.Title.Length > 70 ? w.Title[..70] + "…" : w.Title,
+                    Style = (Style)FindResource("BigButton"), MinWidth = 150, Height = 92, Margin = new Thickness(0, 0, 10, 10),
+                    Content = monitor.IsPrimary ? Loc.T("WholeScreen") : Loc.T("ScreenN", n),
+                    ToolTip = $"{monitor.Width} × {monitor.Height}",
+                };
+                Ui.SetGlyph(button, "");
+                button.Click += (_, _) => { Selected = monitor; DialogResult = true; };
+                monitors.Children.Add(button);
+                n++;
+            }
+            root.Children.Add(monitors);
+        }
+
+        var windows = CaptureTarget.Windows()
+            .OrderByDescending(w => w.Title.Contains("3uTools", StringComparison.OrdinalIgnoreCase)
+                || w.Title.Contains("Realtime", StringComparison.OrdinalIgnoreCase)
+                || w.Title.Contains("iDevice", StringComparison.OrdinalIgnoreCase)
+                || w.Title.Contains("iPhone", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (windows.Count > 0)
+        {
+            root.Children.Add(new TextBlock
+            {
+                Text = windowsOnly ? "Available application windows" : Loc.T("Windows"),
+                Foreground = subtle,
+                Margin = new Thickness(0, 8, 0, 8),
+            });
+            var list = new StackPanel();
+            foreach (var w in windows.Take(60))
+            {
+                var button = new Button
+                {
+                    Style = (Style)FindResource("PlainButton"),
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                    Margin = new Thickness(0, 0, 0, 6),
+                    Content = w.Title.Length > 90 ? w.Title[..90] + "…" : w.Title,
+                    ToolTip = $"{w.Width} × {w.Height}",
                     FlowDirection = FlowDirection.LeftToRight,
                 };
                 button.Click += (_, _) => { Selected = w; DialogResult = true; };
                 list.Children.Add(button);
             }
-            root.Children.Add(new ScrollViewer { Content = list, MaxHeight = 260, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+            root.Children.Add(new ScrollViewer { Content = list, MaxHeight = 320, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+        }
+        else
+        {
+            root.Children.Add(new TextBlock
+            {
+                Text = "No capturable windows were found. Open 3uTools and start Toolbox > Realtime Screen, then try again.",
+                Foreground = subtle,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 8, 0, 8),
+            });
         }
 
         var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 16, 0, 0) };
-        if (screenActive)
+        if (screenActive && !windowsOnly)
         {
             var hide = new Button { Style = (Style)FindResource("PlainButton"), Content = Loc.T("HideScreen") };
             hide.Click += (_, _) => { HideRequested = true; DialogResult = true; };
