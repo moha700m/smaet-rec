@@ -5,7 +5,7 @@ using static SmaetRec.Media.Native;
 namespace SmaetRec.Media;
 
 /// <summary>What Windows currently knows about an iPhone on a USB cable.</summary>
-public sealed record UsbPhoneStatus(bool PhonePluggedIn, bool AppleDriverInstalled, string? NetworkAddress)
+public sealed record UsbPhoneStatus(bool PhonePluggedIn, bool AppleDriverInstalled, string? NetworkAddress, string? DeviceId = null)
 {
     public bool Ready => PhonePluggedIn && AppleDriverInstalled && NetworkAddress != null;
 }
@@ -18,7 +18,8 @@ public static class UsbPhoneDetector
 {
     public static UsbPhoneStatus Check()
     {
-        bool plugged = AppleMobileDevicePresent();
+        string? deviceId = AppleMobileDeviceId();
+        bool plugged = deviceId != null;
         string? address = null;
         bool adapterSeen = false;
         try
@@ -34,25 +35,30 @@ public static class UsbPhoneDetector
         }
         catch (NetworkInformationException) { }
         bool driver = adapterSeen || AppleDriverInstalled();
-        return new UsbPhoneStatus(plugged, driver, address);
+        return new UsbPhoneStatus(plugged, driver, address, deviceId);
     }
 
     /// <summary>True when a present USB device has Apple's vendor id and an iPhone/iPad product id (0x12xx).</summary>
-    private static bool AppleMobileDevicePresent()
+    private static string? AppleMobileDeviceId()
     {
         const uint filterEnumerator = 0x1, filterPresent = 0x100;
         try
         {
-            if (CM_Get_Device_ID_List_Size(out uint length, "USB", filterEnumerator | filterPresent) != 0 || length == 0) return false;
+            if (CM_Get_Device_ID_List_Size(out uint length, "USB", filterEnumerator | filterPresent) != 0 || length == 0) return null;
             var buffer = new char[length];
-            if (CM_Get_Device_ID_List("USB", buffer, length, filterEnumerator | filterPresent) != 0) return false;
+            if (CM_Get_Device_ID_List("USB", buffer, length, filterEnumerator | filterPresent) != 0) return null;
             foreach (var id in new string(buffer).Split('\0', StringSplitOptions.RemoveEmptyEntries))
-                if (id.Contains("VID_05AC&PID_12", StringComparison.OrdinalIgnoreCase)) return true;
+            {
+                if (!id.Contains("VID_05AC&PID_12", StringComparison.OrdinalIgnoreCase)) continue;
+                int slash = id.LastIndexOf('\\');
+                if (slash < 0 || slash == id.Length - 1) continue;
+                string serial = id[(slash + 1)..].Trim();
+                if (serial.Length >= 16 && serial.Length <= 48 && serial.All(c => char.IsAsciiLetterOrDigit(c) || c == '-')) return serial;
+            }
         }
         catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException) { }
-        return false;
+        return null;
     }
-
     private static bool AppleDriverInstalled()
     {
         try
