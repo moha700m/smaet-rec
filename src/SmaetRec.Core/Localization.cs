@@ -126,6 +126,7 @@ public sealed class Loc : INotifyPropertyChanged
         ["DiagAppleMuxUnavailable"] = ("لم يصل رد usbmux صالح من 127.0.0.1:27015؛ وجود الهاتف في الصور لا يثبت عمل هذا الاتصال.", "No valid usbmux response came from 127.0.0.1:27015; seeing the phone in Photos does not prove this transport works."),
         ["DiagAppleMuxLegacy"] = ("حزمة Apple والخدمة تعملان، لكن اختبار ListDevices لم يؤكد ناقل usbmux بعد", "The Apple package and service are running, but the ListDevices probe has not confirmed usbmux yet"),
         ["DiagCaptureFilterFound"] = ("مرشح libusb0 مثبت على الجهاز الأب لهذا الآيفون", "The libusb0 filter is attached to this iPhone's USB parent"),
+        ["DiagCaptureFilterNoPhone"] = ("مرشح USB الخاص بالآيفون يظهر بعد توصيل الجهاز", "The per-device USB filter is shown after the iPhone is connected"),
         ["DiagCaptureFilterMissing"] = ("مرشح libusb0 غير مثبت على هذا الآيفون؛ افتح مدير تعريف iPhoneMirror لإعداده", "The libusb0 filter is missing for this iPhone; open the iPhoneMirror driver manager to set it up"),
         ["DiagCopyUsbReport"] = ("نسخ تقرير USB", "Copy USB report"),
         ["GetAppleDevices"] = ("تثبيت Apple Devices", "Get Apple Devices"),
