@@ -74,6 +74,42 @@ public sealed class Studio : IDisposable
         catch (Exception e) when (e is not OutOfMemoryException) { Log.Error("Receiver start", e); }
     });
 
+    /// <summary>
+    /// Uses a selected 3uTools Realtime Screen HWND as a live source in the
+    /// existing studio scene. It is rendered, annotated and recorded by the
+    /// same D3D11 compositor as every other screen/window capture.
+    /// </summary>
+    public void ShowThreeUToolsWindow(CaptureTarget target)
+    {
+        if (target.Kind != CaptureKind.Window)
+            throw new ArgumentException("The 3uTools source must be a window, not a monitor.", nameof(target));
+        if (!target.StillExists)
+            throw new InvalidOperationException("The selected 3uTools preview window has already closed.");
+
+        int width = Math.Max(1, target.Width);
+        int height = Math.Max(1, target.Height);
+        double aspect = width / (double)height;
+        const double margin = 40;
+        double maxWidth = Scene.CanvasWidth - margin * 2;
+        double maxHeight = Scene.CanvasHeight - margin * 2;
+        double scale = Math.Min(maxWidth / width, maxHeight / height);
+
+        lock (Scene.Sync)
+        {
+            Scene.Phone.Visible = false;
+            Scene.Screen.Visible = true;
+            Scene.Screen.Aspect = aspect;
+            Scene.Screen.Width = width * scale;
+            Scene.Screen.CenterX = Scene.CanvasWidth / 2;
+            Scene.Screen.CenterY = Scene.CanvasHeight / 2;
+            Scene.Screen.RotationDeg = 0;
+        }
+
+        Scene.NotifyChanged();
+        Engine.ShowScreen(target);
+        Log.Write($"3uTools Realtime Screen selected: {target.Title} ({width}x{height})");
+    }
+
     public async Task ConnectUsbAsync(string usbSerial, CancellationToken cancellationToken = default)
     {
         await StopUsbAsync().ConfigureAwait(false);
