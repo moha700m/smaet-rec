@@ -30,7 +30,13 @@ public sealed class Loc : INotifyPropertyChanged
     public static string T(string key) =>
         Table.TryGetValue(key, out var v) ? (Instance._language == "en" ? v.En : v.Ar) : key;
 
-    public static string T(string key, params object[] args) => string.Format(T(key), args);
+    public static string T(string key, params object[] args)
+    {
+        string text = T(key);
+        // A wrong placeholder count in one translation must show the plain text, not crash the window that asked for it.
+        try { return string.Format(text, args); }
+        catch (FormatException) { return text; }
+    }
 
     public static IReadOnlyDictionary<string, (string Ar, string En)> All => Table;
 

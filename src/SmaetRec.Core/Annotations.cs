@@ -94,7 +94,9 @@ public sealed class AnnotationStore
     private List<Annotation> _items = new();
     private Annotation[] _snapshot = Array.Empty<Annotation>();
     private Annotation? _inProgress;
-    private readonly Stack<(List<Annotation> before, List<Annotation> after)> _undo = new();
+    /// <summary>How many steps can be taken back. Each step keeps a full list, so an unbounded history grows with the square of the stroke count.</summary>
+    public const int MaxHistory = 200;
+    private readonly LinkedList<(List<Annotation> before, List<Annotation> after)> _undo = new();
     private readonly Stack<(List<Annotation> before, List<Annotation> after)> _redo = new();
 
     public event Action? Changed;
@@ -116,7 +118,8 @@ public sealed class AnnotationStore
 
     private void Commit(List<Annotation> after)
     {
-        _undo.Push((_items, after));
+        _undo.AddLast((_items, after));
+        if (_undo.Count > MaxHistory) _undo.RemoveFirst();
         _redo.Clear();
         _items = after;
         Rebuild();
@@ -134,7 +137,7 @@ public sealed class AnnotationStore
         {
             _inProgress = null;
             if (a.IsDegenerate) { Rebuild(); }
-            else Commit(new List<Annotation>(_items) { a });
+            else Commit(new List<Annotation>(_items) { a.Clone() }); // the caller may keep editing its own object
         }
         Changed?.Invoke();
     }
@@ -169,7 +172,8 @@ public sealed class AnnotationStore
         lock (_lock)
         {
             if (_undo.Count == 0) return;
-            var step = _undo.Pop();
+            var step = _undo.Last!.Value;
+            _undo.RemoveLast();
             _redo.Push(step);
             _items = step.before;
             Rebuild();
@@ -183,7 +187,7 @@ public sealed class AnnotationStore
         {
             if (_redo.Count == 0) return;
             var step = _redo.Pop();
-            _undo.Push(step);
+            _undo.AddLast(step);
             _items = step.after;
             Rebuild();
         }

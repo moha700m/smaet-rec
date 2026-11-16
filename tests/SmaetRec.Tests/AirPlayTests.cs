@@ -638,3 +638,20 @@ public class AdvertisingTests
         Assert.Equal(0, receiver.AnnouncedAdapters);
     }
 }
+
+public class AirPlayConnectionTests
+{
+    [Fact]
+    public void Accepted_connections_probe_for_a_vanished_phone()
+    {
+        using var listener = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork, System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
+        listener.Bind(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 0));
+        listener.Listen(1);
+        using var phone = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork, System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
+        phone.Connect(listener.LocalEndPoint!);
+        using var accepted = listener.Accept();
+        SmaetRec.AirPlay.AirPlayReceiver.EnableDeadPeerDetection(accepted);
+        Assert.NotEqual(0, (int)accepted.GetSocketOption(System.Net.Sockets.SocketOptionLevel.Socket, System.Net.Sockets.SocketOptionName.KeepAlive)!);
+        Assert.Equal(6, (int)accepted.GetSocketOption(System.Net.Sockets.SocketOptionLevel.Tcp, System.Net.Sockets.SocketOptionName.TcpKeepAliveTime)!);
+    }
+}

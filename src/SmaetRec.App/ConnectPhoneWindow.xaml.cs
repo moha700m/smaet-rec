@@ -94,6 +94,11 @@ public partial class ConnectPhoneWindow : Window
             InstallUsbDriver.Visibility = File.Exists(Path.Combine(AppContext.BaseDirectory, "usb", "iPhoneMirror.Driver.exe")) ? Visibility.Visible : Visibility.Collapsed;
             if (problem != null && usb.PhonePluggedIn && !_detailsOpenedOnce) { _detailsOpenedOnce = true; UsbDetails.IsExpanded = true; }
         }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // This runs from a timer in an async void method: an escaped exception would close the whole app.
+            Log.Error("USB status refresh", ex);
+        }
         finally { _checking = false; }
     }
 
@@ -126,7 +131,8 @@ public partial class ConnectPhoneWindow : Window
         if (_studio.UsbState is Studio.UsbPhase.Live or Studio.UsbPhase.Stalled)
         {
             ConnectUsb.IsEnabled = false;
-            await _studio.StopUsbAsync();
+            try { await _studio.StopUsbAsync(); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { Log.Error("USB stop", ex); }
             UpdateUsbButton();
             return;
         }
@@ -138,9 +144,10 @@ public partial class ConnectPhoneWindow : Window
         _usbConnecting = true;
         UpdateUsbButton();
         try { await _studio.ConnectUsbAsync(_usbDeviceId); }
-        catch (Exception ex) when (ex is IOException or TimeoutException or InvalidOperationException or ArgumentException or OperationCanceledException or PlatformNotSupportedException)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            MessageBox.Show(this, Loc.T("UsbFailedBody", ex.Message), Loc.T("UsbFailedTitle"), MessageBoxButton.OK, MessageBoxImage.Warning);
+            Log.Error("USB connect", ex);
+            if (IsLoaded) MessageBox.Show(this, Loc.T("UsbFailedBody", ex.Message), Loc.T("UsbFailedTitle"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally { _usbConnecting = false; UpdateUsbButton(); }
     }

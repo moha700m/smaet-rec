@@ -266,6 +266,7 @@ public sealed class AirPlayReceiver : IDisposable
             try { client = await listener.AcceptTcpClientAsync(ct).ConfigureAwait(false); }
             catch (Exception e) when (e is OperationCanceledException or SocketException or ObjectDisposedException) { return; }
             client.NoDelay = true;
+            EnableDeadPeerDetection(client.Client);
             _ = Task.Run(async () =>
             {
                 try { await handler(client, ct).ConfigureAwait(false); }
@@ -274,6 +275,23 @@ public sealed class AirPlayReceiver : IDisposable
                 finally { client.Dispose(); }
             }, ct);
         }
+    }
+
+    /// <summary>
+    /// An iPhone that walks out of Wi-Fi range or locks without saying goodbye leaves the connection half open:
+    /// reads would wait forever and the app would keep showing "connected" over a frozen picture.
+    /// Keep-alive probes make the read fail after about 12 seconds so the session is cleaned up and a new one can start.
+    /// </summary>
+    public static void EnableDeadPeerDetection(Socket socket)
+    {
+        try
+        {
+            socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, 6);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval, 2);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, 3);
+        }
+        catch (Exception e) when (e is SocketException or ObjectDisposedException or NotSupportedException or PlatformNotSupportedException) { }
     }
 
     private static async Task HoldOpenAsync(TcpClient client, CancellationToken ct)
