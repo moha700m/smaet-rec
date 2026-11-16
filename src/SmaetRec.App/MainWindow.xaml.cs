@@ -511,12 +511,30 @@ public partial class MainWindow : Window
         var picker = new ScreenPickerWindow(Engine.ScreenActive) { Owner = this };
         if (picker.ShowDialog() != true) return;
         if (picker.HideRequested) Engine.HideScreen();
-        else if (picker.Selected != null)
-        {
-            lock (Scene.Sync) Scene.Screen.Visible = true;
-            Engine.ShowScreen(picker.Selected);
-        }
+        else if (picker.Selected != null) ShowCapturedWindow(picker.Selected);
         Dispatcher.BeginInvoke(UpdateMouseWatcher, DispatcherPriority.Background);
+    }
+
+    /// <summary>
+    /// Routes an externally selected window (including 3uTools Realtime Screen)
+    /// into the same live scene, compositor, effects, and recorder as any other source.
+    /// </summary>
+    public void ShowCapturedWindow(CaptureTarget target)
+    {
+        if (target.Kind != CaptureKind.Window || !target.StillExists)
+        {
+            ShowToast(Loc.T("CaptureWindowClosed"), null, isError: true);
+            return;
+        }
+
+        lock (Scene.Sync) Scene.Screen.Visible = true;
+        Scene.NotifyChanged();
+        Engine.ShowScreen(target);
+        Dispatcher.BeginInvoke(() =>
+        {
+            UpdateMouseWatcher();
+            RefreshStatus();
+        }, DispatcherPriority.Background);
     }
 
     private void Settings_Click(object sender, RoutedEventArgs e)
