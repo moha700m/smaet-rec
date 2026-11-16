@@ -19,6 +19,6 @@
     <Resource Include="Assets\app.ico" />
     <Resource Include="Assets\logo.png" />
     <Using Include="System.IO" />
-    <Content Include="resources/usb/**/*" Link="usb/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="usb/**/*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
