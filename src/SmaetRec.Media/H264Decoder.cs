@@ -217,7 +217,9 @@ public sealed class H264Decoder : IDisposable
                 if (hr.Code == MediaFoundationRuntime.NeedMoreInput) return;
                 if (hr.Code == MediaFoundationRuntime.StreamChange) { SelectOutputType(); continue; }
                 hr.CheckError();
-                var result = output.Sample ?? ours;
+                // After the call the binding hands back a NEW wrapper in output.Sample, even when it is the very
+                // sample we passed in. Always work through our own wrapper in that case (see the finally block).
+                var result = ours ?? output.Sample;
                 if (result == null) return;
                 Interlocked.Increment(ref _outputs);
                 _decodeMs += System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
@@ -252,7 +254,11 @@ public sealed class H264Decoder : IDisposable
             }
             finally
             {
-                if (output.Sample != null && !ReferenceEquals(output.Sample, ours)) output.Sample.Dispose();
+                // One COM reference must be released exactly once. output.Sample and `ours` are two wrappers around
+                // the same pointer when we supplied the sample; releasing through both frees it twice and corrupts
+                // the native heap (seen as: packets go in, no picture comes out, and later a crash).
+                var returned = output.Sample;
+                if (returned != null && (ours == null || returned.NativePointer != ours.NativePointer)) returned.Dispose();
                 output.Events?.Dispose();
                 ours?.Dispose();
             }

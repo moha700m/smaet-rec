@@ -109,13 +109,109 @@ public partial class MainWindow : Window
         RefreshHistoryButtons();
         UpdateMouseWatcher();
 
+        if (App.ArgValue("--dev-selftest") is { } report) _ = RunSelfTestAsync(report);
         switch (App.ArgValue("--dev-open"))
         {
             case "connect": Phone_Click(this, new RoutedEventArgs()); break;
             case "settings": Dispatcher.BeginInvoke(() => Settings_Click(this, new RoutedEventArgs())); break;
             case "screens": Dispatcher.BeginInvoke(() => Screen_Click(this, new RoutedEventArgs())); break;
+            case "3u": Dispatcher.BeginInvoke(() => (new ThreeUToolsWindowPicker { Owner = this }).ShowDialog()); break;
             case "diag": Dispatcher.BeginInvoke(() => (new ConnectionDiagnosticsWindow(_studio) { Owner = this }).Show()); break;
         }
+    }
+
+    /// <summary>
+    /// Development check used by the automated Windows tests: drives the real handlers behind the buttons
+    /// (draw, undo/redo, effects, zoom, record, stop) and writes what happened to a small report file.
+    /// </summary>
+    private async Task RunSelfTestAsync(string reportPath)
+    {
+        var lines = new List<string>();
+        void Note(string key, object? value) => lines.Add($"{key}={value}");
+        try
+        {
+            await Task.Delay(2500);
+            var (w, h) = Preview.PixelSize;
+            var fit = Compositor.PreviewRect(w, h);
+            (int x, int y) At(double fx, double fy) => ((int)(fit.X + fit.Width * fx), (int)(fit.Y + fit.Height * fy));
+            void Drag((int x, int y) from, (int x, int y) to)
+            {
+                OnPointerDown(from.x, from.y);
+                for (int i = 1; i <= 8; i++) OnPointerMove(from.x + (to.x - from.x) * i / 8, from.y + (to.y - from.y) * i / 8);
+                OnPointerUp(to.x, to.y);
+            }
+
+            // Arrange: drag the screen layer, then put the layout back.
+            double before = Scene.Screen.CenterX;
+            var grab = At(Scene.Screen.CenterX / Scene.CanvasWidth, Scene.Screen.CenterY / Scene.CanvasHeight);
+            Drag(grab, (grab.x + 60, grab.y + 30));
+            Note("layerMoved", Math.Abs(Scene.Screen.CenterX - before) > 5);
+            Note("layerSelected", Engine.Selected);
+            Arrange_Click(BtnReset, new RoutedEventArgs());
+            Arrange_Click(BtnPip, new RoutedEventArgs());
+            Note("presetApplied", Scene.LastPreset);
+            Arrange_Click(BtnSide, new RoutedEventArgs());
+
+            // Draw: every drawing tool once, then eraser, undo, redo.
+            BtnDraw.IsChecked = true; Mode_Click(BtnDraw, new RoutedEventArgs());
+            Note("drawBarVisible", DrawBar.Visibility == Visibility.Visible);
+            int n = 0;
+            foreach (var tool in new[] { Tool.Pen, Tool.Highlighter, Tool.Arrow, Tool.Ellipse, Tool.Rectangle, Tool.Blur })
+            {
+                SetTool(tool);
+                Drag(At(0.10 + n * 0.08, 0.15), At(0.16 + n * 0.08, 0.30));
+                n++;
+            }
+            Note("drawn", Scene.Annotations.Count);
+            SetTool(Tool.Eraser);
+            var onArrow = At(0.10 + 2 * 0.08 + 0.03, 0.225);
+            OnPointerDown(onArrow.x, onArrow.y); OnPointerUp(onArrow.x, onArrow.y);
+            Note("afterErase", Scene.Annotations.Count);
+            History_Click(BtnUndo, new RoutedEventArgs());
+            Note("afterUndo", Scene.Annotations.Count);
+            History_Click(BtnUndo, new RoutedEventArgs());
+            History_Click(BtnRedo, new RoutedEventArgs());
+            Note("afterUndoRedo", Scene.Annotations.Count);
+            ToolSpotlight.IsChecked = true; Pointer_Click(ToolSpotlight, new RoutedEventArgs());
+            Note("spotlight", Engine.Spotlight);
+            ToolSpotlight.IsChecked = false; Pointer_Click(ToolSpotlight, new RoutedEventArgs());
+
+            // Effects: toggles, background, zoom.
+            BtnDraw.IsChecked = false; BtnEffects.IsChecked = true; Mode_Click(BtnEffects, new RoutedEventArgs());
+            Note("effectsBarVisible", EffectsBar.Visibility == Visibility.Visible);
+            FxShadows.IsChecked = false; Effect_Click(FxShadows, new RoutedEventArgs());
+            Note("shadowsOff", !Scene.Effects.Shadows);
+            ((System.Windows.Controls.RadioButton)BackgroundPanel.Children[2]).IsChecked = true;
+            Note("background", Scene.Effects.BackgroundIndex);
+            Zoom_Click(BtnZoomIn, new RoutedEventArgs());
+            await Task.Delay(900);
+            Note("zoom", Engine.Zoom.Current.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture));
+            Zoom_Click(BtnZoomReset, new RoutedEventArgs());
+
+            // Record through the same buttons a person presses.
+            Record_Click(BtnRecord, new RoutedEventArgs());
+            Note("recording", Engine.IsRecording);
+            Note("stopEnabled", BtnStop.IsEnabled);
+            Note("recordDisabledWhileRecording", !BtnRecord.IsEnabled);
+            await Task.Delay(3200);
+            Note("timerShown", RecPill.Visibility == Visibility.Visible ? RecTime.Text : "hidden");
+            string? path = _recording?.Path;
+            await StopRecording();
+            Note("stopped", !Engine.IsRecording);
+            Note("recordEnabledAgain", BtnRecord.IsEnabled);
+            Note("video", path);
+            Note("videoBytes", path != null && File.Exists(path) ? new FileInfo(path).Length : 0);
+            Note("toast", Toast.Visibility == Visibility.Visible ? ToastText.Text : "hidden");
+            Note("phoneStatus", PhoneStatus.Text);
+            Note("screenStatus", ScreenStatus.Text);
+            Note("result", "ok");
+        }
+        catch (Exception e)
+        {
+            Note("result", "exception: " + e);
+        }
+        try { File.WriteAllLines(reportPath, lines); } catch (IOException) { }
+        Close();
     }
 
     private async void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)

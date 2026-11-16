@@ -445,6 +445,27 @@ public class EngineTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void Many_decoder_sessions_in_a_row_all_produce_pictures()
+    {
+        // Regression: the decoder released its output sample twice on every call. That corrupts the native heap, which
+        // showed up only now and then - a session where packets went in and no picture came out, or a later crash.
+        // Sixty sessions make such a fault show itself.
+        var clips = new[] { "quad-590x1278.h264", "quad-664x1440.h264", "quad-1170x2532.h264", "quad-886x1920.h264" }
+            .Select(name => (name, units: AccessUnits(name))).ToArray();
+        for (int round = 0; round < 60; round++)
+        {
+            var (name, units) = clips[round % clips.Length];
+            var frames = new MemoryFrameSource();
+            using var decoder = new H264Decoder(frames);
+            long t = 0;
+            foreach (var unit in units) { decoder.Push(unit, t, isKeyFrame: ContainsNal(unit, 5)); t += 33_333; }
+            bool done = WaitFor(() => decoder.Error != null || decoder.PicturesDecoded >= units.Count - 1, 10000);
+            Assert.True(decoder.Error == null, $"round {round} ({name}) failed: {decoder.Error}");
+            Assert.True(done && decoder.FramesDecoded >= 1, $"round {round} ({name}) produced no picture: {decoder.Describe()}");
+        }
+    }
+
+    [Fact]
     public void Rotating_the_phone_mid_stream_keeps_the_picture_right()
     {
         var frames = new MemoryFrameSource();
