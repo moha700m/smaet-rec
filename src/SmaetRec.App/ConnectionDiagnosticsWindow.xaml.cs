@@ -75,7 +75,8 @@ public partial class ConnectionDiagnosticsWindow : Window
             else
             {
                 VideoText.Text = Loc.T("DiagVideoLine", receiver.MirrorPackets, receiver.MirrorPictures,
-                    _studio.PhoneFramesDecoded, receiver.MirrorInvalid);
+                    _studio.PhoneFramesDecoded, receiver.MirrorInvalid)
+                    + (receiver.MirrorKeyVariant is { } key ? $" · {key}" : "");
                 VideoDot.Fill = Res(_studio.PhoneFramesDecoded > 0 ? "GreenBrush" : "AmberBrush");
             }
 

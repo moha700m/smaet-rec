@@ -11,6 +11,8 @@ public sealed class Studio : IDisposable
     private readonly object _receiverLogLock = new();
     private readonly Queue<string> _receiverLog = new();
     private H264Decoder? _decoder;
+    private long? _firstPacketTimestamp;
+    private long _lastPacketPts = -1;
     private System.Threading.Timer? _autosave;
 
     public AppSettings Settings { get; }
@@ -73,8 +75,20 @@ public sealed class Studio : IDisposable
     {
         lock (_decoderLock)
         {
-            _decoder ??= new H264Decoder(Engine.PhoneFrames);
-            _decoder.Push(packet.Data, packet.TimestampMicros, packet.IsKeyFrame);
+            if (_decoder == null)
+            {
+                _decoder = new H264Decoder(Engine.PhoneFrames);
+                _firstPacketTimestamp = null;
+                _lastPacketPts = -1;
+            }
+            // Windows Media Foundation is happiest with small, strictly increasing sample
+            // times. The phone sends an NTP wall clock, so make the first packet zero and
+            // keep every following frame relative to it.
+            long pts = packet.TimestampMicros - (_firstPacketTimestamp ??= packet.TimestampMicros);
+            if (pts < 0) pts = 0;
+            if (pts <= _lastPacketPts) pts = _lastPacketPts + 1;
+            _lastPacketPts = pts;
+            _decoder.Push(packet.Data, pts, packet.IsKeyFrame);
         }
     }
 
@@ -97,7 +111,7 @@ public sealed class Studio : IDisposable
         else
         {
             H264Decoder? old;
-            lock (_decoderLock) { old = _decoder; _decoder = null; }
+            lock (_decoderLock) { old = _decoder; _decoder = null; _firstPacketTimestamp = null; _lastPacketPts = -1; }
             old?.Dispose();
             if (!Engine.PhoneFrames.IsSimulated) Engine.PhoneFrames.Clear();
         }

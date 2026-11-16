@@ -46,6 +46,8 @@ public sealed class AirPlayReceiver : IDisposable
     public long MirrorInvalid => _mirrorDecoder?.InvalidPackets ?? 0;
     public bool MirrorCodecUnsupported => _mirrorDecoder?.UnsupportedCodec ?? false;
     public string? MirrorIssue => _mirrorDecoder?.LastIssue ?? _lastMirrorIssue;
+    /// <summary>Which key derivation produced valid H.264: "FairPlay" or "FairPlay+ECDH".</summary>
+    public string? MirrorKeyVariant { get; private set; }
     public int ControlPort { get; private set; }
     public ReceiverState State { get; private set; } = ReceiverState.Stopped;
     public string? LastError { get; private set; }
@@ -608,24 +610,47 @@ public sealed class AirPlayReceiver : IDisposable
             return;
         }
 
-        MirrorStreamDecoder decoder;
-        try
+        // The FairPlay key is mixed with the X25519 secret only when pairing actually produced
+        // one. A stale/absent pairing that is mixed anyway decrypts every packet into invalid
+        // AVCC data (the "invalid" counter keeps rising and no key frame arrives). Build both
+        // candidates and let the first two valid pictures decide which one the phone used.
+        var variants = new List<(string Name, MirrorStreamDecoder Decoder)>();
+        void TryAdd(string name, bool mixEcdh)
         {
-            decoder = MirrorStreamDecoder.Create(s.KeyMessage, s.EncryptedKey, s.EcdhShared, s.StreamConnectionId);
+            try
+            {
+                variants.Add((name, MirrorStreamDecoder.Create(s.KeyMessage, s.EncryptedKey,
+                    mixEcdh ? s.EcdhShared : null, s.StreamConnectionId, mixEcdh)));
+            }
+            catch (Exception e) when (e is InvalidOperationException or IndexOutOfRangeException or ArgumentException)
+            {
+                Log?.Invoke($"Mirror key candidate {name} failed: {e.Message}");
+            }
         }
-        catch (Exception e) when (e is InvalidOperationException or IndexOutOfRangeException or ArgumentException)
+
+        bool canPair = s.EcdhShared is { Length: 32 };
+        if (s.PairVerified && canPair) TryAdd("FairPlay+ECDH", mixEcdh: true);
+        TryAdd("FairPlay", mixEcdh: false);
+        if (!s.PairVerified && canPair) TryAdd("FairPlay+ECDH", mixEcdh: true);
+        if (variants.Count == 0)
         {
-            Log?.Invoke("Could not derive the mirror key: " + e.Message);
+            Log?.Invoke("Could not derive any mirror key; closing");
             return;
         }
 
-        _mirrorDecoder = decoder;
+        MirrorStreamDecoder? active = variants.Count == 1 ? variants[0].Decoder : null;
+        string activeName = variants.Count == 1 ? variants[0].Name : "";
+        _mirrorDecoder = active ?? variants[0].Decoder;
+        MirrorKeyVariant = activeName.Length == 0 ? null : activeName;
+
         var stream = client.GetStream();
         var header = new byte[MirrorStreamDecoder.HeaderSize];
         Interlocked.Increment(ref _activeMirrorStreams);
         SetState(ReceiverState.Connected);
-        Log?.Invoke($"iPhone mirroring started from {remote} (stream {s.StreamConnectionId}, ecdh={s.EcdhShared != null})");
+        Log?.Invoke($"iPhone mirroring started from {remote} (stream {s.StreamConnectionId}, paired={s.PairVerified}, ecdh={s.EcdhShared != null}, key candidates={variants.Count})");
         long headers = 0;
+        var score = new int[variants.Count];
+        bool warned = false;
         try
         {
             while (!ct.IsCancellationRequested)
@@ -637,39 +662,88 @@ public sealed class AirPlayReceiver : IDisposable
                     Log?.Invoke($"Mirror stream out of sync (size={size}); closing");
                     break;
                 }
+                if (headers < 8) Log?.Invoke($"Mirror header #{headers}: type={type}, size={size}");
                 var payload = new byte[size];
                 if (size > 0 && !await stream.ReadFullyAsync(payload, size, ct).ConfigureAwait(false)) break;
-                if (headers++ == 0) Log?.Invoke($"Mirror packet: type={type}, size={size}");
-                VideoPacket? packet;
+                if (headers < 8) Log?.Invoke($"Mirror payload #{headers} read");
+                headers++;
+
+                VideoPacket? packet = null;
                 try
                 {
-                    packet = decoder.Handle(header, payload);
+                    if (active != null)
+                    {
+                        packet = active.Handle(header, payload);
+                    }
+                    else
+                    {
+                        int chosen = -1;
+                        for (int i = 0; i < variants.Count; i++)
+                        {
+                            // Handle() decrypts and rewrites the payload in place. Each candidate
+                            // must see the original ciphertext, or the first (possibly wrong) key
+                            // corrupts the bytes before the correct candidate can try them.
+                            var candidate = variants[i].Decoder.Handle(header, (byte[])payload.Clone());
+                            if (candidate == null) continue;
+                            score[i]++;
+                            // A key frame is already strong evidence; a delta frame needs a second one.
+                            if (candidate.IsKeyFrame || score[i] >= 2)
+                            {
+                                chosen = i;
+                                packet = candidate;
+                                break;
+                            }
+                        }
+                        if (chosen >= 0)
+                        {
+                            active = variants[chosen].Decoder;
+                            activeName = variants[chosen].Name;
+                            for (int i = 0; i < variants.Count; i++)
+                                if (i != chosen) variants[i].Decoder.Dispose();
+                            variants = new List<(string, MirrorStreamDecoder)> { (activeName, active) };
+                            score = new[] { 0 };
+                            _mirrorDecoder = active;
+                            MirrorKeyVariant = activeName;
+                            Log?.Invoke($"Mirror key validated: {activeName} after {active.Packets} packet(s)");
+                        }
+                        else if (!warned && headers > 30 && variants.All(v => v.Decoder.Pictures == 0))
+                        {
+                            warned = true;
+                            Log?.Invoke("No mirror key variant produced a valid H.264 packet yet; " +
+                                        $"invalid counts: {string.Join(", ", variants.Select(v => $"{v.Name}={v.Decoder.InvalidPackets}"))}");
+                        }
+                    }
                 }
                 catch (Exception e) when (e is IndexOutOfRangeException or ArgumentException or InvalidOperationException)
                 {
                     Log?.Invoke($"Mirror packet could not be parsed (type={type}, size={size}): {e.Message}");
                     break;
                 }
+
                 if (packet != null)
                 {
-                    if (packet.IsKeyFrame && decoder.KeyFrames == 1)
-                        Log?.Invoke($"First key frame: {packet.Data.Length} bytes, {decoder.Width}x{decoder.Height}");
+                    var current = active ?? variants[0].Decoder;
+                    if (packet.IsKeyFrame && current.KeyFrames == 1)
+                        Log?.Invoke($"First key frame: {packet.Data.Length} bytes, {current.Width}x{current.Height}");
                     VideoPacket?.Invoke(packet);
                 }
-                else if (type == 1 && decoder.Width > 0)
+                else if (type == 1 && (active ?? variants[0].Decoder).Width > 0)
                 {
-                    Log?.Invoke($"Video format: {decoder.Width}x{decoder.Height} ({size} byte config)");
+                    var current = active ?? variants[0].Decoder;
+                    Log?.Invoke($"Video format: {current.Width}x{current.Height} ({size} byte config)");
                 }
             }
         }
         finally
         {
-            _lastMirrorIssue = decoder.LastIssue;
-            Log?.Invoke($"iPhone mirroring stopped: packets={decoder.Packets}, pictures={decoder.Pictures}, " +
-                        $"keyframes={decoder.KeyFrames}, invalid={decoder.InvalidPackets}" +
-                        (decoder.LastIssue is { } issue ? $" — {issue}" : ""));
+            var final = active ?? variants[0].Decoder;
+            _lastMirrorIssue = final.LastIssue;
+            Log?.Invoke($"iPhone mirroring stopped: packets={final.Packets}, pictures={final.Pictures}, " +
+                        $"keyframes={final.KeyFrames}, invalid={final.InvalidPackets}" +
+                        (MirrorKeyVariant is { } variant ? $", key={variant}" : "") +
+                        (final.LastIssue is { } issue ? $" — {issue}" : ""));
             _mirrorDecoder = null;
-            decoder.Dispose();
+            foreach (var v in variants) v.Decoder.Dispose();
             if (Interlocked.Decrement(ref _activeMirrorStreams) <= 0 && State == ReceiverState.Connected)
                 SetState(ReceiverState.Waiting);
         }

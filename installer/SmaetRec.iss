@@ -1,6 +1,6 @@
 ; SMAET REC installer (Inno Setup 6). Built in CI: iscc /DAppVersion=1.0.0 /DSourceDir=..\publish\SmaetRec installer\SmaetRec.iss
 #ifndef AppVersion
-  #define AppVersion "1.0.2"
+  #define AppVersion "1.0.3"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\publish\SmaetRec"

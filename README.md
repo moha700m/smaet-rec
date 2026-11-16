@@ -47,6 +47,15 @@
 - نافذة التشخيص تعرض الآن عدد حزم الفيديو والصور والإطارات المفكوكة والحزم التالفة، وزر «نسخ السجل».
 - لم يعد الاتصال يُقطع إذا فشل التحقق من توقيع الاقتران؛ يُسجَّل الخطأ وتستمر الجلسة.
 
+### إصلاح 1.0.3 — الحزم التالفة والتقطيع
+
+بعد 1.0.2 بقيت حالة يظهر فيها «تالفة» في التشخيص ثم يتجمّد الفيديو. السبب: مفتاح الفيديو يُخلط مع سر ECDH **فقط إذا اكتمل الاقتران فعلاً**. بعض الجلسات تُكمل `pair-verify` عندنا لكن الآيفون يستخدم المفتاح المباشر، فيُفك التشفير بمفتاح خاطئ وتصبح كل حزمة «تالفة». الآن يجرّب المستقبل **المفتاحين** (FairPlay المباشر، وFairPlay+ECDH) على أول صور، ويختار تلقائيًا المفتاح الذي ينتج H.264 صالحًا، ويظهر اسمه في التشخيص.
+
+كذلك:
+- تُحوَّل طوابع وقت الآيفون إلى أزمنة نسبية صغيرة قبل تمريرها لمفكك Windows، لتجنّب تعليق المفكك أو تقطيع العرض.
+- تُتجاهل حزم الإيقاف/الاستئناف الفارغة بدل اعتبارها خطأ في SPS/PPS.
+- يُسجَّل نوع أول حزم المرآة والمفتاح الذي نجح، لتشخيص أسرع.
+
 **بخصوص التعريفات:** AirPlay عبر Wi‑Fi **لا يحتاج أي تعريفات iPhone**. تعريفات Apple مطلوبة فقط لطريقة USB عبر شبكة «نقطة الاتصال الشخصية»، وتُثبّت من تطبيق **Apple Devices** الرسمي في متجر مايكروسوفت (زر «تثبيت Apple Devices» في نافذة الربط). لا يمكن تضمين تعريفات Apple داخل التطبيق لأنها ملكية خاصة بـApple.
 
 ### ربط الآيفون بالكابل (USB)
@@ -110,6 +119,15 @@ When the iPhone connected and the app said "connected" but no picture appeared, 
 - `/info` now carries `txtAirPlay` and `txtRAOP` the way iOS expects.
 - Connection diagnostics show video packets, pictures, decoded frames and invalid packets, plus a **Copy log** button.
 - A failed pair-verify signature no longer drops the connection; it is logged and the session continues.
+
+### Fixed in 1.0.3 — invalid packets and stuttering
+
+After 1.0.2, some sessions still showed rising `invalid` packets and the video froze. The video key must be mixed with the ECDH secret **only when pairing really completed**; some sessions finish `pair-verify` on our side while the iPhone uses the direct FairPlay key, so every packet decrypted to garbage. The receiver now tries **both** derivations (direct FairPlay and FairPlay+ECDH) on the first pictures, picks the one that yields valid H.264 automatically, and shows the chosen key in diagnostics.
+
+Also:
+- iPhone timestamps are converted to small relative sample times before Windows Media Foundation, avoiding decoder stalls and stutter.
+- Empty pause/resume packets are ignored instead of being reported as bad SPS/PPS.
+- The first mirror packet types and the successful key variant are logged for faster diagnosis.
 
 **Drivers:** AirPlay over Wi-Fi needs **no iPhone drivers**. Apple's drivers are only needed for the USB hotspot network, installed from the official **Apple Devices** app in the Microsoft Store (button in the Connect window). Apple's proprietary drivers cannot be bundled in this app.
 

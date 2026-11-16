@@ -43,9 +43,14 @@ public sealed class H264Decoder : IDisposable
         if (_disposed) return;
         if (!_queue.TryAdd((annexB, timestampMicros, isKeyFrame)))
         {
-            // Hopelessly behind: drop everything and resume from the next key frame.
-            while (_queue.TryTake(out _)) { }
-            _waitForKey = true;
+            // Behind. A key frame is a clean restart point; for a delta frame, drop the new
+            // picture and let the decoder finish the frames it already has. Clearing the whole
+            // queue here used to freeze the picture until the phone sent its next key frame.
+            if (isKeyFrame)
+            {
+                while (_queue.TryTake(out _)) { }
+                _queue.TryAdd((annexB, timestampMicros, isKeyFrame));
+            }
         }
     }
 

@@ -40,7 +40,7 @@ public sealed class MirrorStreamDecoder : IDisposable
     public MirrorStreamDecoder(byte[] streamKey, byte[] streamIv) => _cipher = new AesCtrStream(streamKey, streamIv);
 
     /// <summary>Derives the video stream key/iv exactly as the sender does.</summary>
-    public static MirrorStreamDecoder Create(byte[]? fairPlayKeyMessage, byte[]? encryptedKey, byte[]? ecdhShared, ulong streamConnectionId)
+    public static MirrorStreamDecoder Create(byte[]? fairPlayKeyMessage, byte[]? encryptedKey, byte[]? ecdhShared, ulong streamConnectionId, bool mixEcdh = true)
     {
         if (fairPlayKeyMessage is not { Length: >= 16 })
             throw new InvalidOperationException("The iPhone never completed the FairPlay handshake (fp-setup).");
@@ -49,7 +49,7 @@ public sealed class MirrorStreamDecoder : IDisposable
 
         var aesKey = new byte[16];
         new OmgHax().DecryptAesKey(fairPlayKeyMessage, encryptedKey, aesKey);
-        return FromSessionKey(aesKey, ecdhShared, streamConnectionId);
+        return FromSessionKey(aesKey, mixEcdh ? ecdhShared : null, streamConnectionId);
     }
 
     /// <summary>
@@ -76,6 +76,9 @@ public sealed class MirrorStreamDecoder : IDisposable
         if (type == 1)
         {
             ReadPictureSize(header);
+            // An empty type-1 packet is the sender's pause/resume notification
+            // (option 0x56/0x5e/0x16), not a codec configuration.
+            if (payload.Length == 0) return null;
             if (payload.Length > 8 && payload[4] == (byte)'h' && payload[5] == (byte)'v')
             {
                 UnsupportedCodec = true;

@@ -363,11 +363,16 @@ public class ReceiverProtocolTests
         Assert.Contains(ReceiverState.Connected, states);
     }
 
-    [Fact]
-    public async Task Full_mirroring_session_delivers_decodable_pictures()
+    [Theory]
+    [InlineData(true, true)]    // normal paired session
+    [InlineData(false, false)]  // legacy pairing disabled: FairPlay key directly
+    [InlineData(true, false)]   // pairing happened but the phone used the direct key
+    public async Task Full_mirroring_session_delivers_decodable_pictures(bool verifyPairing, bool mixEcdh)
     {
         using var receiver = new AirPlayReceiver();
         var packets = new ConcurrentQueue<VideoPacket>();
+        var logs = new ConcurrentQueue<string>();
+        receiver.Log += m => logs.Enqueue(m);
         var threePictures = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         receiver.VideoPacket += p =>
         {
@@ -387,26 +392,30 @@ public class ReceiverProtocolTests
 
         Assert.Equal(receiver.PublicKey, (await Send(stream, "POST", "/pair-setup", new byte[32])).body);
 
-        // pair-verify, played from the iPhone side.
-        var edPrivate = RandomNumberGenerator.GetBytes(32); var edPublic = new byte[32];
-        Ed25519.GeneratePublicKey(edPrivate, 0, edPublic, 0);
-        var ecdhPrivate = RandomNumberGenerator.GetBytes(32); var ecdhPublic = new byte[32];
-        X25519.ScalarMultBase(ecdhPrivate, 0, ecdhPublic, 0);
-        var v1 = await Send(stream, "POST", "/pair-verify", new byte[] { 1, 0, 0, 0 }.Concat(ecdhPublic).Concat(edPublic).ToArray());
-        Assert.Equal(200, v1.status);
-        var serverEcdh = v1.body[..32];
-        var shared = new byte[32];
-        X25519.ScalarMult(ecdhPrivate, 0, serverEcdh, 0, shared, 0);
-        using var pairCipher = new AesCtrStream(
-            SHA512.HashData(Encoding.UTF8.GetBytes("Pair-Verify-AES-Key").Concat(shared).ToArray())[..16],
-            SHA512.HashData(Encoding.UTF8.GetBytes("Pair-Verify-AES-IV").Concat(shared).ToArray())[..16]);
-        var serverSignature = v1.body[32..];
-        pairCipher.Process(serverSignature);
-        Assert.True(Ed25519.Verify(serverSignature, 0, receiver.PublicKey, 0, serverEcdh.Concat(ecdhPublic).ToArray(), 0, 64));
-        var ourSignature = new byte[64];
-        Ed25519.Sign(edPrivate, 0, ecdhPublic.Concat(serverEcdh).ToArray(), 0, 64, ourSignature, 0);
-        pairCipher.Process(ourSignature);
-        Assert.Equal(200, (await Send(stream, "POST", "/pair-verify", new byte[] { 0, 0, 0, 0 }.Concat(ourSignature).ToArray())).status);
+        // pair-verify, played from the iPhone side (skipped when legacy pairing is disabled).
+        byte[]? shared = null;
+        if (verifyPairing)
+        {
+            var edPrivate = RandomNumberGenerator.GetBytes(32); var edPublic = new byte[32];
+            Ed25519.GeneratePublicKey(edPrivate, 0, edPublic, 0);
+            var ecdhPrivate = RandomNumberGenerator.GetBytes(32); var ecdhPublic = new byte[32];
+            X25519.ScalarMultBase(ecdhPrivate, 0, ecdhPublic, 0);
+            var v1 = await Send(stream, "POST", "/pair-verify", new byte[] { 1, 0, 0, 0 }.Concat(ecdhPublic).Concat(edPublic).ToArray());
+            Assert.Equal(200, v1.status);
+            var serverEcdh = v1.body[..32];
+            shared = new byte[32];
+            X25519.ScalarMult(ecdhPrivate, 0, serverEcdh, 0, shared, 0);
+            using var pairCipher = new AesCtrStream(
+                SHA512.HashData(Encoding.UTF8.GetBytes("Pair-Verify-AES-Key").Concat(shared).ToArray())[..16],
+                SHA512.HashData(Encoding.UTF8.GetBytes("Pair-Verify-AES-IV").Concat(shared).ToArray())[..16]);
+            var serverSignature = v1.body[32..];
+            pairCipher.Process(serverSignature);
+            Assert.True(Ed25519.Verify(serverSignature, 0, receiver.PublicKey, 0, serverEcdh.Concat(ecdhPublic).ToArray(), 0, 64));
+            var ourSignature = new byte[64];
+            Ed25519.Sign(edPrivate, 0, ecdhPublic.Concat(serverEcdh).ToArray(), 0, 64, ourSignature, 0);
+            pairCipher.Process(ourSignature);
+            Assert.Equal(200, (await Send(stream, "POST", "/pair-verify", new byte[] { 0, 0, 0, 0 }.Concat(ourSignature).ToArray())).status);
+        }
 
         // FairPlay handshake
         var fp1 = await Send(stream, "POST", "/fp-setup", new byte[] { 0x46, 0x50, 0x4c, 0x59, 3, 1, 1, 0, 0, 0, 0, 4, 2, 0, 0, 0xbb });
@@ -447,7 +456,7 @@ public class ReceiverProtocolTests
         // Derive the picture key exactly as the receiver does.
         var aesKey = new byte[16];
         new OmgHax().DecryptAesKey(fpMessage, ekey, aesKey);
-        var eaesKey = SHA512.HashData(aesKey.Concat(shared).ToArray())[..16];
+        var eaesKey = mixEcdh && shared != null ? SHA512.HashData(aesKey.Concat(shared).ToArray())[..16] : aesKey;
         var pictureKey = SHA512.HashData(Encoding.UTF8.GetBytes("AirPlayStreamKey" + streamId).Concat(eaesKey).ToArray())[..16];
         var pictureIv = SHA512.HashData(Encoding.UTF8.GetBytes("AirPlayStreamIV" + streamId).Concat(eaesKey).ToArray())[..16];
         using var sender = new AesCtrStream(pictureKey, pictureIv);
@@ -484,7 +493,8 @@ public class ReceiverProtocolTests
             await SendPacket(0, frame, (ulong)(i + 1) << 32);
         }
 
-        await threePictures.Task.WaitAsync(TimeSpan.FromSeconds(8));
+        try { await threePictures.Task.WaitAsync(TimeSpan.FromSeconds(8)); }
+        catch (TimeoutException) { Assert.Fail("Timed out. Receiver log:\n" + string.Join("\n", logs)); }
         var received = packets.ToArray();
         Assert.Equal(3, received.Length);
         Assert.True(received[0].IsKeyFrame);
@@ -493,6 +503,7 @@ public class ReceiverProtocolTests
         Assert.Equal((1170, 2532), (received[0].Width, received[0].Height));
         Assert.Equal(3, receiver.MirrorPictures);
         Assert.Equal(0, receiver.MirrorInvalid);
+        Assert.Equal(mixEcdh && verifyPairing ? "FairPlay+ECDH" : "FairPlay", receiver.MirrorKeyVariant);
 
         video.Close();
         await WaitFor(() => receiver.State == ReceiverState.Waiting);
