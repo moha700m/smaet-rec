@@ -101,6 +101,7 @@ public partial class MainWindow : Window
             case "connect": Phone_Click(this, new RoutedEventArgs()); break;
             case "settings": Dispatcher.BeginInvoke(() => Settings_Click(this, new RoutedEventArgs())); break;
             case "screens": Dispatcher.BeginInvoke(() => Screen_Click(this, new RoutedEventArgs())); break;
+            case "diag": Dispatcher.BeginInvoke(() => new ConnectionDiagnosticsWindow(_studio) { Owner = this }.Show()); break;
         }
     }
 

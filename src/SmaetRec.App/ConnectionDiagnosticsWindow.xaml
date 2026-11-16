@@ -1,0 +1,69 @@
+<Window x:Class="SmaetRec.App.ConnectionDiagnosticsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:core="clr-namespace:SmaetRec.Core;assembly=SmaetRec.Core"
+        Title="{Binding [DiagTitle], Source={x:Static core:Loc.Instance}}"
+        Width="720" Height="640" MinHeight="520">
+    <Grid Margin="22">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,14">
+            <TextBlock Text="{Binding [DiagTitle], Source={x:Static core:Loc.Instance}}" FontSize="22" FontWeight="SemiBold"/>
+            <TextBlock Text="{Binding [DiagSubtitle], Source={x:Static core:Loc.Instance}}" Foreground="{StaticResource SubtleBrush}"
+                       FontSize="12.5" Margin="0,4,0,0" TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <Border Background="{StaticResource SurfaceBrush}" CornerRadius="14" Padding="16">
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                            <Ellipse x:Name="AirPlayDot" Width="10" Height="10" Fill="{StaticResource AmberBrush}" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="AirPlayText" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                            <Ellipse x:Name="NetworkDot" Width="10" Height="10" Fill="{StaticResource AmberBrush}" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="NetworkText" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                            <Ellipse x:Name="FirewallDot" Width="10" Height="10" Fill="{StaticResource AmberBrush}" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="FirewallText" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="DriverDot" Width="10" Height="10" Fill="{StaticResource AmberBrush}" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="DriverText" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <TextBlock Text="{Binding [DiagHint], Source={x:Static core:Loc.Instance}}" TextWrapping="Wrap"
+                           Foreground="{StaticResource SubtleBrush}" FontSize="12.5" Margin="2,12,2,0"/>
+
+                <WrapPanel Margin="0,12,0,0">
+                    <Button x:Name="RepairButton" Style="{StaticResource AccentButton}" Content="{Binding [DiagRepair], Source={x:Static core:Loc.Instance}}" Click="Repair_Click"/>
+                    <Button Style="{StaticResource PlainButton}" Content="{Binding [DiagNetworkSettings], Source={x:Static core:Loc.Instance}}" Click="NetworkSettings_Click"/>
+                    <Button Style="{StaticResource PlainButton}" Content="{Binding [DiagInstallDrivers], Source={x:Static core:Loc.Instance}}" Click="InstallDrivers_Click"/>
+                </WrapPanel>
+
+                <TextBlock x:Name="MessageText" Foreground="{StaticResource SubtleBrush}" FontSize="12.5" Margin="2,10,2,0" TextWrapping="Wrap"/>
+
+                <Border Background="#0B0E13" CornerRadius="10" Margin="0,12,0,0" Padding="10">
+                    <StackPanel>
+                        <TextBlock Text="{Binding [DiagLog], Source={x:Static core:Loc.Instance}}" Foreground="{StaticResource SubtleBrush}" FontSize="12" Margin="0,0,0,6"/>
+                        <TextBox x:Name="LogText" Height="140" IsReadOnly="True" BorderThickness="0" Background="Transparent"
+                                 Foreground="#B9C2D0" FontFamily="Consolas, Segoe UI" FontSize="11"
+                                 TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                                 VerticalContentAlignment="Top"/>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Button Grid.Row="2" Style="{StaticResource PlainButton}" Content="{Binding [DiagClose], Source={x:Static core:Loc.Instance}}"
+                HorizontalAlignment="Right" Margin="0,14,0,0" IsCancel="True" Click="Close_Click"/>
+    </Grid>
+</Window>

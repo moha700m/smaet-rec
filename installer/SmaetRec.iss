@@ -39,7 +39,9 @@ Name: "{autodesktop}\SMAET REC"; Filename: "{app}\SmaetRec.exe"; Tasks: desktopi
 [Run]
 ; Let the iPhone reach the app on home/work networks (AirPlay needs incoming connections and device discovery).
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""SMAET REC"" dir=in action=allow program=""{app}\SmaetRec.exe"" enable=yes profile=private,domain"; Flags: runhidden
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""SMAET REC mDNS"" dir=in action=allow program=""{app}\SmaetRec.exe"" protocol=UDP localport=5353 enable=yes profile=private,domain"; Flags: runhidden
 Filename: "{app}\SmaetRec.exe"; Description: "{cm:LaunchProgram,SMAET REC}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""SMAET REC"""; Flags: runhidden; RunOnceId: "RemoveFirewallRule"
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""SMAET REC mDNS"""; Flags: runhidden; RunOnceId: "RemoveMdnsFirewallRule"

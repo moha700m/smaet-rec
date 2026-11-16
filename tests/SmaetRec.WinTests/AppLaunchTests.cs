@@ -58,6 +58,7 @@ public class AppLaunchTests(ITestOutputHelper output)
     [InlineData("app-arabic-connect", "--dev-simulated-source --lang ar --dev-open connect")]
     [InlineData("app-english-connect", "--dev-simulated-source --lang en --dev-open connect")]
     [InlineData("app-arabic-settings", "--dev-simulated-source --lang ar --dev-open settings")]
+    [InlineData("app-arabic-diagnostics", "--dev-simulated-source --lang ar --dev-open diag")]
     [InlineData("app-english-screens", "--dev-simulated-source --lang en --dev-open screens")]
     [InlineData("app-real-start", "--lang ar")]
     public void App_starts_and_shows_its_window(string name, string arguments)

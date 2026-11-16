@@ -14,6 +14,7 @@ public partial class ConnectPhoneWindow : Window
     private readonly Studio _studio;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1.5) };
     private bool _checking;
+    private ConnectionDiagnosticsWindow? _diagnostics;
 
     public ConnectPhoneWindow(Studio studio)
     {
@@ -68,6 +69,13 @@ public partial class ConnectPhoneWindow : Window
     }
 
     private void Reconnect_Click(object sender, RoutedEventArgs e) => _studio.StartReceiver();
+
+    private void Diagnose_Click(object sender, RoutedEventArgs e)
+    {
+        if (_diagnostics is { IsLoaded: true }) { _diagnostics.Activate(); return; }
+        _diagnostics = new ConnectionDiagnosticsWindow(_studio) { Owner = this };
+        _diagnostics.Show();
+    }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
 

@@ -32,7 +32,13 @@
 2. افتح مركز التحكم في الآيفون ← «انعكاس الشاشة».
 3. اختر **SMAET REC**.
 
-إذا لم يظهر الاسم: اسمح للبرنامج في جدار حماية ويندوز (المثبِّت يفعل ذلك تلقائيًا)، ثم اضغط «إعادة الاتصال».
+إذا لم يظهر الاسم في الآيفون:
+
+1. من نافذة «ربط الآيفون» اضغط **«تشخيص الاتصال»** ثم **«إصلاح الاتصال»**. يضيف هذا قاعدة جدار حماية للتطبيق وخدمة mDNS، ويحوّل الشبكة العامة إلى خاصة عند الحاجة (قد يطلب ويندوز إذن المدير).
+2. تأكد أن الآيفون والكمبيوتر على **نفس شبكة Wi-Fi**، وأن الشبكة **خاصة** لا عامة، وأن VPN أو عزل العملاء (AP Isolation) غير مفعّل.
+3. أعد تشغيل AirPlay من زر «إعادة الاتصال»، ثم أعد فتح «انعكاس الشاشة» في الآيفون.
+
+**بخصوص التعريفات:** AirPlay عبر Wi‑Fi **لا يحتاج أي تعريفات iPhone**. تعريفات Apple مطلوبة فقط لطريقة USB عبر شبكة «نقطة الاتصال الشخصية»، وتُثبّت من تطبيق **Apple Devices** الرسمي في متجر مايكروسوفت (زر «تثبيت Apple Devices» في نافذة الربط). لا يمكن تضمين تعريفات Apple داخل التطبيق لأنها ملكية خاصة بـApple.
 
 ### ربط الآيفون بالكابل (USB)
 
@@ -84,6 +90,10 @@ In the preview, drag a layer to move it, drag a corner to resize, drag the top h
 ### Connecting the iPhone
 
 **Wi-Fi (AirPlay):** same Wi-Fi network → Control Center → Screen Mirroring → **SMAET REC**.
+
+If the name never appears: open **Connect iPhone → Connection diagnostics → Repair connection**. This adds the app's firewall and mDNS rules and sets a Public network to Private when needed (Windows may ask for administrator rights). Also check that both devices are on the same Wi-Fi, VPN/AP isolation is off, and the network is Private.
+
+**Drivers:** AirPlay over Wi-Fi needs **no iPhone drivers**. Apple's drivers are only needed for the USB hotspot network, installed from the official **Apple Devices** app in the Microsoft Store (button in the Connect window). Apple's proprietary drivers cannot be bundled in this app.
 
 **USB cable:** install *Apple Devices* (Microsoft Store) or iTunes → plug in and tap *Trust* → turn on *Personal Hotspot* → Control Center → Screen Mirroring → **SMAET REC**. The picture then travels over the cable's network link instead of Wi-Fi. This is AirPlay over the wire, not a raw USB video capture: Windows has no supported driver for raw iPhone screen capture, and the unofficial route replaces Apple's driver and breaks syncing, so it is deliberately not used.
 

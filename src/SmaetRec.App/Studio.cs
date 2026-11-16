@@ -8,6 +8,8 @@ namespace SmaetRec.App;
 public sealed class Studio : IDisposable
 {
     private readonly object _decoderLock = new();
+    private readonly object _receiverLogLock = new();
+    private readonly Queue<string> _receiverLog = new();
     private H264Decoder? _decoder;
     private System.Threading.Timer? _autosave;
 
@@ -32,7 +34,15 @@ public sealed class Studio : IDisposable
         Engine.SetOutputSize(Settings.OutputWidth, Settings.OutputHeight);
         UpdateTexts();
 
-        Receiver.Log += Log.Write;
+        Receiver.Log += message =>
+        {
+            lock (_receiverLogLock)
+            {
+                _receiverLog.Enqueue($"{DateTime.Now:HH:mm:ss}  {message}");
+                while (_receiverLog.Count > 120) _receiverLog.Dequeue();
+            }
+            Log.Write(message);
+        };
         Receiver.VideoPacket += OnVideoPacket;
         Receiver.StateChanged += OnReceiverState;
         Scene.Changed += ScheduleAutosave;
@@ -81,6 +91,12 @@ public sealed class Studio : IDisposable
     }
 
     public bool PhoneConnected => Receiver.State == ReceiverState.Connected || Engine.PhoneFrames.IsSimulated;
+
+    /// <summary>Recent AirPlay messages, newest last. Safe to call from the UI thread while the receiver is logging.</summary>
+    public IReadOnlyList<string> ReceiverLogSnapshot()
+    {
+        lock (_receiverLogLock) return _receiverLog.ToArray();
+    }
 
     private void ScheduleAutosave()
     {
