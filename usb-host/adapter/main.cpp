@@ -134,12 +134,12 @@ bool FindDevice(const std::wstring& requested, std::wstring& udid) {
     std::vector<std::wstring> matches;
     for (const auto& d : devices) {
         if (!d.usb_connected || d.udid[0] == L'\0') continue;
+        // iPhoneMirror's USB discovery and capture backend use the same
+        // normalized physical USB serial for PnP, usbmux and libusb matching.
+        // A suffix/partial match is not safe: it could select a different
+        // attached device and will not pass the engine's own exact preflight.
         const std::wstring candidate(d.udid);
-        const auto normalized = Normalize(candidate);
-        const bool exact = normalized == wanted;
-        const bool suffix = wanted.size() >= 16 && normalized.size() >= 16 &&
-            (normalized.ends_with(wanted) || wanted.ends_with(normalized));
-        if (exact || suffix) matches.push_back(candidate);
+        if (Normalize(candidate) == wanted) matches.push_back(candidate);
     }
     if (matches.size() != 1) return false;
     udid = matches.front();
@@ -165,7 +165,7 @@ int Run(const std::wstring& pipeName, const std::wstring& requestedSerial) {
     bool sessionCreated = false;
     std::wstring udid;
     if (!FindDevice(requestedSerial, udid)) {
-        SendError(L"Connected Apple device could not be matched to the selected USB serial. Unlock the iPhone and trust this computer.");
+        SendError(L"No exact USB serial match was found in usbmux. Unlock the iPhone, tap Trust This Computer, and reconnect the cable. Do not connect multiple Apple devices while selecting the phone.");
         exitCode = 6;
     } else {
         iPhoneMirror::CaptureOptions options{};
