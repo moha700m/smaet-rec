@@ -93,6 +93,16 @@ public sealed class InstallerTests
         => Assert.Contains("PendingFileRenameOperations", Workflow);
 
     [Fact]
+    public void Workflow_treats_missing_pending_file_rename_registry_value_as_optional()
+    {
+        Assert.Contains("OpenSubKey", Workflow);
+        Assert.Contains("GetValue(\"PendingFileRenameOperations\", $null)", Workflow);
+        Assert.DoesNotContain("Get-ItemPropertyValue", Workflow);
+        Assert.Contains("No PendingFileRenameOperations registry value is present", Workflow);
+        Assert.Contains("Final diagnostics could not be collected", Workflow);
+    }
+
+    [Fact]
     public void Workflow_uploads_installer_diagnostics_even_when_the_test_fails()
     {
         Assert.Contains("name: installer-test-diagnostics", Workflow);
