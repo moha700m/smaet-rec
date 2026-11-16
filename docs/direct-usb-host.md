@@ -59,8 +59,10 @@ notices, and corresponding source archive.
 - Apple Devices or desktop iTunes with Apple Mobile Device Support installed.
 - Data-capable USB cable; iPhone unlocked; accept “Trust This Computer”.
 - Upstream-compatible Apple USB capture interface and libusb0 filter driver
-  where required. The upstream engine's configuration helper is packaged
-  beside the host. Driver installation remains a separate privileged action;
+  where required. The “USB driver setup / repair” button opens the upstream
+  standalone driver manager (administrator consent may be requested). The
+  upstream engine's configuration helper is packaged beside the host. Driver
+  installation remains a separate privileged action;
   do not use Zadig to replace the Apple parent device driver or disable
   Windows driver-signature enforcement.
 
