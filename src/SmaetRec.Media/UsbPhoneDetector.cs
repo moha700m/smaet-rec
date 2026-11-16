@@ -8,11 +8,14 @@ public sealed record UsbPhoneStatus(
     bool PhonePluggedIn,
     bool AppleUsbDriverInstalled,
     bool AppleMobileDeviceServiceRunning,
+    string? ParentDriverService = null,
     string? DeviceId = null)
 {
     // iTunes/Lockdown needs both the actual Apple USB driver package and the
     // Apple Mobile Device service. A photo-transfer/PTP device alone is not enough.
     public bool AppleSupportInstalled => AppleUsbDriverInstalled && AppleMobileDeviceServiceRunning;
+    public bool ParentCompositeDriverReady =>
+        !PhonePluggedIn || string.Equals(ParentDriverService, "usbccgp", StringComparison.OrdinalIgnoreCase);
     public bool Ready => PhonePluggedIn;
 }
 
@@ -55,14 +58,17 @@ public static class UsbPhoneDetector
 
     public static UsbPhoneStatus Check()
     {
-        string? deviceId = AppleMobileDeviceId();
+        var device = FindAppleMobileUsbDevice();
         bool driverInstalled = AppleUsbDriverInstalled();
         bool serviceRunning = AppleMobileDeviceServiceRunning();
-        return new UsbPhoneStatus(deviceId != null, driverInstalled, serviceRunning, deviceId);
+        string? parentService = device is null ? null : ReadParentDriverService(device.InstanceId);
+        return new UsbPhoneStatus(device != null, driverInstalled, serviceRunning, parentService, device?.Serial);
     }
 
     /// <summary>Find a present Apple mobile USB parent and return its PnP instance serial.</summary>
-    private static string? AppleMobileDeviceId()
+    private sealed record ApplePnpDevice(string Serial, string InstanceId);
+
+    private static ApplePnpDevice? FindAppleMobileUsbDevice()
     {
         const uint filterEnumerator = 0x1, filterPresent = 0x100;
         try
@@ -80,13 +86,27 @@ public static class UsbPhoneDetector
                 string serial = id[(slash + 1)..].Trim();
                 if (serial.Length >= 16 && serial.Length <= 48 &&
                     serial.All(c => char.IsAsciiLetterOrDigit(c) || c == '-'))
-                    return serial;
+                    return new ApplePnpDevice(serial, id);
             }
         }
         catch (Exception error) when (error is DllNotFoundException or EntryPointNotFoundException)
         {
         }
         return null;
+    }
+
+    private static string? ReadParentDriverService(string instanceId)
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                @"SYSTEM\CurrentControlSet\Enum\\" + instanceId, writable: false);
+            return key?.GetValue("Service") as string;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return null;
+        }
     }
 
     private static bool AppleUsbDriverInstalled()
