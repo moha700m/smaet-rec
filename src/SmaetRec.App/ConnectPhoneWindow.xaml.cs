@@ -57,8 +57,8 @@ public partial class ConnectPhoneWindow : Window
         {
             var usb = await Task.Run(UsbPhoneDetector.Check);
             _usbDeviceId = usb.DeviceId;
-            _usbReady = usb.Ready;
-            ConnectUsb.IsEnabled = usb.Ready && _usbDeviceId != null && !_usbConnecting && !_studio.UsbSessionActive;
+            _usbReady = usb.PhonePluggedIn;
+            ConnectUsb.IsEnabled = usb.PhonePluggedIn && _usbDeviceId != null && !_usbConnecting && !_studio.UsbSessionActive;
             ConnectUsb.Content = _studio.UsbConnected ? "USB streaming" : _studio.UsbSessionActive ? "Waiting for video..." : "Connect USB";
             Set(UsbPhone, UsbPhoneDot, usb.PhonePluggedIn, Loc.T(usb.PhonePluggedIn ? "UsbPhoneFound" : "UsbPhoneMissing"));
             Set(UsbDriver, UsbDriverDot, usb.AppleDriverInstalled, Loc.T(usb.AppleDriverInstalled ? "UsbDriverFound" : "UsbDriverMissing"));
