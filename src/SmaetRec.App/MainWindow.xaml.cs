@@ -519,7 +519,7 @@ public partial class MainWindow : Window
     /// Routes an externally selected window (including 3uTools Realtime Screen)
     /// into the same live scene, compositor, effects, and recorder as any other source.
     /// </summary>
-    public void ShowCapturedWindow(CaptureTarget target)
+    public void ShowCapturedWindow(CaptureTarget target, bool fullCanvas = false)
     {
         if (target.Kind != CaptureKind.Window || !target.StillExists)
         {
@@ -527,7 +527,32 @@ public partial class MainWindow : Window
             return;
         }
 
-        lock (Scene.Sync) Scene.Screen.Visible = true;
+        if (fullCanvas)
+        {
+            int width = Math.Max(1, target.Width);
+            int height = Math.Max(1, target.Height);
+            double aspect = width / (double)height;
+            const double margin = 40;
+            double scale = Math.Min(
+                (Scene.CanvasWidth - margin * 2) / width,
+                (Scene.CanvasHeight - margin * 2) / height);
+
+            lock (Scene.Sync)
+            {
+                Scene.Phone.Visible = false;
+                Scene.Screen.Visible = true;
+                Scene.Screen.Aspect = aspect;
+                Scene.Screen.Width = width * scale;
+                Scene.Screen.CenterX = Scene.CanvasWidth / 2;
+                Scene.Screen.CenterY = Scene.CanvasHeight / 2;
+                Scene.Screen.RotationDeg = 0;
+            }
+        }
+        else
+        {
+            lock (Scene.Sync) Scene.Screen.Visible = true;
+        }
+
         Scene.NotifyChanged();
         Engine.ShowScreen(target);
         Dispatcher.BeginInvoke(() =>
