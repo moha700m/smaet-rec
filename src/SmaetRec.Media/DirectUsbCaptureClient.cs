@@ -16,6 +16,9 @@ public sealed class DirectUsbCaptureClient : IAsyncDisposable
     private CancellationTokenSource? _stop;
     private Task? _reader;
     private int _started;
+    private int _pipeConnected;
+
+    public bool IsActive => Volatile.Read(ref _started) != 0 && Volatile.Read(ref _pipeConnected) != 0;
 
     public event Action<byte[], int, int, long>? VideoFrame;
     public event Action<string>? Status;
@@ -50,6 +53,7 @@ public sealed class DirectUsbCaptureClient : IAsyncDisposable
             }
             if (completed == timeout) throw new TimeoutException("USB host did not connect to the IPC pipe within 25 seconds.");
             await connection.ConfigureAwait(false);
+            Volatile.Write(ref _pipeConnected, 1);
             Status?.Invoke("USB host IPC connected; waiting for QuickTime video.");
             _reader = ReadLoopAsync(_pipe, _stop.Token);
         }
@@ -105,7 +109,7 @@ public sealed class DirectUsbCaptureClient : IAsyncDisposable
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (EndOfStreamException e) when (!token.IsCancellationRequested) { Failed?.Invoke(e.Message); }
         catch (Exception e) when (e is IOException or InvalidDataException or JsonException or KeyNotFoundException or OverflowException or InvalidOperationException) { Failed?.Invoke(e.Message); }
-        finally { Disconnected?.Invoke(); }
+        finally { Volatile.Write(ref _pipeConnected, 0); Disconnected?.Invoke(); }
     }
 
     private static async Task ReadExactlyAsync(Stream stream, Memory<byte> buffer, CancellationToken token)
