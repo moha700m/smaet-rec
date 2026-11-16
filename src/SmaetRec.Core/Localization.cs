@@ -105,7 +105,7 @@ public sealed class Loc : INotifyPropertyChanged
         ["UsbStep1"] = ("وصّل الآيفون بالكمبيوتر بالكابل واضغط «وثوق» على الآيفون", "Plug the iPhone in with its cable and tap “Trust” on the iPhone"),
         ["UsbStep2"] = ("تأكد من تثبيت تطبيق Apple Devices أو iTunes على الكمبيوتر", "Make sure Apple Devices or iTunes is installed on this computer"),
         ["UsbStep3"] = ("اترك الآيفون مفتوحًا واضغط «Connect USB» بالأسفل — لا تحتاج إلى انعكاس الشاشة أو نقطة الاتصال", "Keep the iPhone unlocked and press “Connect USB” below — Screen Mirroring and Personal Hotspot are not required"),
-        ["UsbNote"] = ("طريقة الكابل ترسل الصورة عبر شبكة الكابل بدل الواي فاي، وتحتاج تطبيق «Apple Devices» أو iTunes على الكمبيوتر. أما AirPlay عبر الواي فاي فلا يحتاج أي تعريفات iPhone.", "The cable method sends the picture over the cable network instead of Wi-Fi. It needs the “Apple Devices” app or iTunes on this computer. AirPlay over Wi-Fi needs no iPhone drivers."),
+        ["UsbNote"] = ("الاتصال هنا مباشر عبر USB. لا تحتاج إلى نقطة اتصال شخصية أو انعكاس الشاشة. إذا لم تظهر الصورة، سيعرض التطبيق مرحلة الفشل بدل الانتظار بلا نهاية.", "This is direct USB capture. Personal Hotspot and Screen Mirroring are not required. If video does not arrive, the app reports the failing stage instead of waiting indefinitely."),
         ["UsbPhoneFound"] = ("تم العثور على آيفون موصول بالكابل", "An iPhone is plugged in"),
         ["UsbPhoneMissing"] = ("لا يوجد آيفون موصول بالكابل", "No iPhone is plugged in"),
         ["UsbDriverFound"] = ("برنامج Apple للأجهزة مثبّت", "Apple device software is installed"),
