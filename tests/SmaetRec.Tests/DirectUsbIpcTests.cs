@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using System.Text.Json;
 using Xunit;
 
@@ -7,23 +6,28 @@ namespace SmaetRec.Tests;
 public sealed class DirectUsbIpcTests
 {
     [Fact]
-    public void LengthPrefix_IsLittleEndian()
+    public void VideoEnvelope_UsesDecodedBgraV2Fields()
     {
-        Span<byte> prefix = stackalloc byte[4];
-        BinaryPrimitives.WriteInt32LittleEndian(prefix, 0x123456);
-        Assert.Equal(new byte[] { 0x56, 0x34, 0x12, 0x00 }, prefix.ToArray());
-        Assert.Equal(0x123456, BinaryPrimitives.ReadInt32LittleEndian(prefix));
-    }
-
-    [Fact]
-    public void VideoEnvelope_DeclaresPayloadAndTiming()
-    {
-        using var doc = JsonDocument.Parse("""{"type":"video","headerBytes":97,"payloadBytes":128,"timestampMicros":1234,"keyFrame":true}""");
+        const string json = """{"type":"video","pixelFormat":"bgra8","width":1920,"height":1080,"stride":7680,"payloadBytes":8294400,"timestamp100ns":123456}""";
+        using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
         Assert.Equal("video", root.GetProperty("type").GetString());
-        Assert.True(root.GetProperty("headerBytes").GetInt32() > 0);
-        Assert.True(root.GetProperty("payloadBytes").GetInt32() > 0);
-        Assert.True(root.GetProperty("timestampMicros").GetInt64() > 0);
-        Assert.True(root.GetProperty("keyFrame").GetBoolean());
+        Assert.Equal("bgra8", root.GetProperty("pixelFormat").GetString());
+        int width = root.GetProperty("width").GetInt32();
+        int height = root.GetProperty("height").GetInt32();
+        int stride = root.GetProperty("stride").GetInt32();
+        int payloadBytes = root.GetProperty("payloadBytes").GetInt32();
+        Assert.Equal(width * 4, stride);
+        Assert.Equal(stride * height, payloadBytes);
+        Assert.True(root.GetProperty("timestamp100ns").GetInt64() > 0);
+    }
+
+    [Theory]
+    [InlineData(1, 1, 4)]
+    [InlineData(1280, 720, 3686400)]
+    [InlineData(1920, 1080, 8294400)]
+    public void BgraPayloadSize_IsExact(int width, int height, int expectedBytes)
+    {
+        Assert.Equal(expectedBytes, checked(width * height * 4));
     }
 }
