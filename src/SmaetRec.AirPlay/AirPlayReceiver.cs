@@ -45,6 +45,8 @@ public sealed class AirPlayReceiver : IDisposable
     public long MirrorKeyFrames => _mirrorDecoder?.KeyFrames ?? 0;
     public long MirrorInvalid => _mirrorDecoder?.InvalidPackets ?? 0;
     public bool MirrorCodecUnsupported => _mirrorDecoder?.UnsupportedCodec ?? false;
+    /// <summary>False while pictures arrive but the stream's SPS/PPS were never found; nothing can be shown in that state.</summary>
+    public bool MirrorHasParameterSets => _mirrorDecoder?.HasParameterSets ?? false;
     public string? MirrorIssue => _mirrorDecoder?.LastIssue ?? _lastMirrorIssue;
     /// <summary>Which key derivation produced valid H.264: "FairPlay" or "FairPlay+ECDH".</summary>
     public string? MirrorKeyVariant { get; private set; }
@@ -723,6 +725,8 @@ public sealed class AirPlayReceiver : IDisposable
                 if (packet != null)
                 {
                     var current = active ?? variants[0].Decoder;
+                    if (current.Pictures == 12)
+                        Log?.Invoke("First pictures' NAL types: " + string.Join(" | ", current.FirstPictureNals) + $"; SPS/PPS known={current.HasParameterSets}");
                     if (packet.IsKeyFrame && current.KeyFrames == 1)
                         Log?.Invoke($"First key frame: {packet.Data.Length} bytes, {current.Width}x{current.Height}");
                     VideoPacket?.Invoke(packet);
@@ -730,6 +734,8 @@ public sealed class AirPlayReceiver : IDisposable
                 else if (type == 1 && (active ?? variants[0].Decoder).Width > 0)
                 {
                     var current = active ?? variants[0].Decoder;
+                    if (current.UnreadableConfigHex is { } hex && size > 0)
+                        Log?.Invoke($"Video config packet not understood ({size} bytes): {hex}");
                     Log?.Invoke($"Video format: {current.Width}x{current.Height} ({size} byte config)");
                 }
             }

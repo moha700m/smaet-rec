@@ -376,6 +376,74 @@ public class EngineTests(ITestOutputHelper output)
         Assert.True(Near(Pixel(px, w, 300, 480), 40, 40, 200), $"the box's path should be clean red (no trail), was {Pixel(px, w, 300, 480)}");
     }
 
+    /// <summary>Removes SPS/PPS from an access unit, leaving what an iPhone sends when its config travels separately.</summary>
+    private static byte[] WithoutParameterSets(byte[] unit)
+    {
+        var starts = new List<int>();
+        for (int i = 0; i + 4 < unit.Length; i++)
+            if (unit[i] == 0 && unit[i + 1] == 0 && unit[i + 2] == 0 && unit[i + 3] == 1) starts.Add(i);
+        using var ms = new MemoryStream();
+        for (int n = 0; n < starts.Count; n++)
+        {
+            int from = starts[n], to = n + 1 < starts.Count ? starts[n + 1] : unit.Length;
+            if ((unit[from + 4] & 0x1F) is 7 or 8) continue;
+            ms.Write(unit, from, to - from);
+        }
+        return ms.ToArray();
+    }
+
+    [Fact]
+    public void Decoder_start_is_decided_by_the_bytes_not_by_a_flag()
+    {
+        Assert.True(H264Decoder.StartsDecodable(new byte[] { 0, 0, 0, 1, 0x67, 1, 2, 0, 0, 0, 1, 0x68, 3, 0, 0, 0, 1, 0x65, 9 }));
+        Assert.True(H264Decoder.StartsDecodable(new byte[] { 0, 0, 0, 1, 0x09, 0xF0, 0, 0, 1, 0x27, 1, 2, 3, 4 }));   // AUD first, 3-byte start code
+        Assert.False(H264Decoder.StartsDecodable(new byte[] { 0, 0, 0, 1, 0x65, 1, 2, 3, 4, 5 }));                    // bare key frame
+        Assert.False(H264Decoder.StartsDecodable(new byte[] { 0, 0, 0, 1, 0x41, 0, 0, 0, 1, 0x67, 1, 2, 3 }));        // SPS after a slice does not help that slice
+        Assert.False(H264Decoder.StartsDecodable(new byte[] { 1, 2, 3 }));
+        Assert.False(H264Decoder.StartsDecodable(Array.Empty<byte>()));
+    }
+
+    [Fact]
+    public void A_key_frame_that_arrives_without_parameter_sets_does_not_block_the_picture_forever()
+    {
+        // Regression: on a real iPhone the receiver counted 1043 good pictures and showed none. The decoder had been
+        // "started" by a key frame it could not use and then swallowed every later picture.
+        var units = AccessUnits("quad-664x1440.h264");   // key frames at 0 and 6 (GOP 6), each with SPS/PPS
+        var frames = new MemoryFrameSource();
+        using var decoder = new H264Decoder(frames);
+        long t = 0;
+        for (int i = 0; i < units.Count; i++)
+        {
+            // The first key frame comes bare and is flagged as a key frame; the later one is complete but NOT flagged.
+            byte[] data = i < 6 ? WithoutParameterSets(units[i]) : units[i];
+            decoder.Push(data, t, isKeyFrame: i == 0);
+            t += 33_333;
+        }
+        bool shown = WaitFor(() => decoder.FramesDecoded >= 1 || decoder.Error != null, 15000);
+        output.WriteLine(decoder.Describe());
+        Assert.True(decoder.Error == null, "decoder failed: " + decoder.Error);
+        Assert.True(shown, "no picture was ever shown: " + decoder.Describe());
+        Assert.True(decoder.Started);
+        Assert.True(frames.TryCopyLatest(out var pixels, out int w, out int h));
+        SavePng("decoded-late-parameter-sets.png", pixels, w, h);
+        Assert.Equal((664, 1440), (w, h));
+        Assert.Null(CheckQuadrants(pixels, w, h));
+    }
+
+    [Fact]
+    public void Pictures_without_any_parameter_sets_are_counted_as_waiting_not_as_decoded()
+    {
+        var units = AccessUnits("quad-664x1440.h264").Select(WithoutParameterSets).ToList();
+        var frames = new MemoryFrameSource();
+        using var decoder = new H264Decoder(frames);
+        long t = 0;
+        foreach (var unit in units) { decoder.Push(unit, t, isKeyFrame: ContainsNal(unit, 5)); t += 33_333; }
+        Assert.True(WaitFor(() => decoder.PacketsWaitingForStart == units.Count, 5000), decoder.Describe());
+        Assert.False(decoder.Started);
+        Assert.Equal(0, decoder.FramesDecoded);
+        Assert.False(frames.TryCopyLatest(out _, out _, out _));
+    }
+
     [Fact]
     public void Rotating_the_phone_mid_stream_keeps_the_picture_right()
     {

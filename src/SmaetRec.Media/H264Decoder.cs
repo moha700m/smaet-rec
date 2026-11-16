@@ -27,6 +27,11 @@ public sealed class H264Decoder : IDisposable
     private double _decodeMs, _convertMs;
     private int _lastBufferLength;
     private long _lastShownTick;
+    private long _skippedBeforeStart;
+
+    /// <summary>Packets ignored so far because the stream's parameter sets (SPS) have not arrived.</summary>
+    public long PacketsWaitingForStart => _waitForKey ? Interlocked.Read(ref _skippedBeforeStart) : 0;
+    public bool Started => !_waitForKey;
 
     public int Width => _width;
     public int Height => _height;
@@ -42,7 +47,7 @@ public sealed class H264Decoder : IDisposable
     public string Describe()
     {
         long outputs = Math.Max(1, Interlocked.Read(ref _outputs)), shown = Math.Max(1, FramesDecoded);
-        return $"in={Interlocked.Read(ref _inputs)} out={Interlocked.Read(ref _outputs)} shown={FramesDecoded} notShown={Interlocked.Read(ref _notShown)} " +
+        return $"started={!_waitForKey} skippedBeforeStart={Interlocked.Read(ref _skippedBeforeStart)} in={Interlocked.Read(ref _inputs)} out={Interlocked.Read(ref _outputs)} shown={FramesDecoded} notShown={Interlocked.Read(ref _notShown)} " +
                $"dropped={PacketsDropped} badLayout={Interlocked.Read(ref _badLayout)} formatChanges={Interlocked.Read(ref _formatChanges)} queue={_queue.Count} " +
                $"decode={_decodeMs / outputs:F1}ms convert={_convertMs / shown:F1}ms " +
                $"coded={_codedWidth}x{_codedHeight} visible={_width}x{_height} stride={_stride} buffer={_lastBufferLength}";
@@ -80,7 +85,21 @@ public sealed class H264Decoder : IDisposable
             CreateTransform();
             foreach (var (data, timestamp, key) in _queue.GetConsumingEnumerable())
             {
-                if (_waitForKey) { if (!key) continue; _waitForKey = false; }
+                if (_waitForKey)
+                {
+                    // The Windows decoder can only start on a packet that carries the stream's
+                    // parameter sets (SPS). Judge that from the bytes themselves: trusting a flag
+                    // from upstream once made the decoder "start" on a packet it could not use and
+                    // then swallow every later picture without ever producing one.
+                    if (!StartsDecodable(data))
+                    {
+                        if (Interlocked.Increment(ref _skippedBeforeStart) == 150)
+                            Log.Write("H264 decoder: 150 packets arrived but none carried SPS yet; still waiting.");
+                        continue;
+                    }
+                    _waitForKey = false;
+                    Log.Write($"H264 decoder starting after skipping {Interlocked.Read(ref _skippedBeforeStart)} packet(s).");
+                }
                 Decode(data, timestamp);
             }
         }
@@ -94,6 +113,22 @@ public sealed class H264Decoder : IDisposable
             _transform?.Dispose();
             _transform = null;
         }
+    }
+
+    /// <summary>True when the packet contains an SPS (NAL type 7) near its start, in Annex-B form.</summary>
+    public static bool StartsDecodable(ReadOnlySpan<byte> annexB)
+    {
+        int limit = Math.Min(annexB.Length - 4, 512);
+        for (int i = 0; i < limit; i++)
+        {
+            if (annexB[i] != 0 || annexB[i + 1] != 0) continue;
+            int nal = annexB[i + 2] == 1 ? i + 3 : annexB[i + 2] == 0 && annexB[i + 3] == 1 ? i + 4 : -1;
+            if (nal < 0 || nal >= annexB.Length) continue;
+            int type = annexB[nal] & 0x1F;
+            if (type == 7) return true;
+            if (type is 1 or 5) return false; // a picture slice came first: no parameter sets in front of it
+        }
+        return false;
     }
 
     private void CreateTransform()
