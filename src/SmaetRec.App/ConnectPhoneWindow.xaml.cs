@@ -56,8 +56,8 @@ public partial class ConnectPhoneWindow : Window
         {
             var usb = await Task.Run(UsbPhoneDetector.Check);
             _usbDeviceId = usb.DeviceId;
-            ConnectUsb.IsEnabled = _usbDeviceId != null && !_usbConnecting;
-            ConnectUsb.Content = _studio.UsbConnected ? "USB connected" : "Connect USB";
+            ConnectUsb.IsEnabled = _usbDeviceId != null && !_usbConnecting && !_studio.UsbSessionActive;
+            ConnectUsb.Content = _studio.UsbConnected ? "USB streaming" : _studio.UsbSessionActive ? "Waiting for video..." : "Connect USB";
             Set(UsbPhone, UsbPhoneDot, usb.PhonePluggedIn, Loc.T(usb.PhonePluggedIn ? "UsbPhoneFound" : "UsbPhoneMissing"));
             Set(UsbDriver, UsbDriverDot, usb.AppleDriverInstalled, Loc.T(usb.AppleDriverInstalled ? "UsbDriverFound" : "UsbDriverMissing"));
             Set(UsbNetwork, UsbNetworkDot, usb.NetworkAddress != null, usb.NetworkAddress != null ? Loc.T("UsbNetworkUp", usb.NetworkAddress) : Loc.T("UsbNetworkDown"));
@@ -79,9 +79,9 @@ public partial class ConnectPhoneWindow : Window
     {
         if (string.IsNullOrWhiteSpace(_usbDeviceId)) { MessageBox.Show(this, "Connect and unlock your iPhone, then try again.", "Direct USB", MessageBoxButton.OK, MessageBoxImage.Information); return; }
         _usbConnecting = true; ConnectUsb.IsEnabled = false; ConnectUsb.Content = "Connecting...";
-        try { await _studio.ConnectUsbAsync(_usbDeviceId); ConnectUsb.Content = "USB connected"; }
+        try { await _studio.ConnectUsbAsync(_usbDeviceId); ConnectUsb.Content = "Waiting for video..."; }
         catch (Exception ex) { ConnectUsb.Content = "Connect USB"; MessageBox.Show(this, ex.Message, "Direct USB capture", MessageBoxButton.OK, MessageBoxImage.Warning); }
-        finally { _usbConnecting = false; ConnectUsb.IsEnabled = _usbDeviceId != null; }
+        finally { _usbConnecting = false; ConnectUsb.IsEnabled = _usbDeviceId != null && !_studio.UsbSessionActive; }
     }
 
     private void Diagnose_Click(object sender, RoutedEventArgs e)
