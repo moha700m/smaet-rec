@@ -64,7 +64,20 @@ public partial class ConnectPhoneWindow : Window
                 : _studio.UsbSessionActive ? "Waiting for video..." : "Connect USB";
             Set(UsbPhone, UsbPhoneDot, usb.PhonePluggedIn, Loc.T(usb.PhonePluggedIn ? "UsbPhoneFound" : "UsbPhoneMissing"));
             Set(UsbDriver, UsbDriverDot, usb.AppleUsbDriverInstalled, Loc.T(usb.AppleUsbDriverInstalled ? "UsbDriverFound" : "UsbDriverMissing"));
-            Set(UsbService, UsbServiceDot, usb.AppleMobileDeviceServiceRunning, Loc.T(usb.AppleMobileDeviceServiceRunning ? "UsbServiceRunning" : "UsbServiceStopped"));
+            Set(UsbService, UsbServiceDot, usb.AppleMobileDeviceServiceRunning,
+                Loc.T(usb.AppleMobileDeviceServiceRunning ? "UsbServiceRunning" : "UsbServiceStopped"));
+            string muxMessage = usb.AppleMuxAvailable
+                ? Loc.T("UsbMuxReady")
+                : usb.HasAppleMuxConflict
+                    ? Loc.T("UsbMuxConflict", usb.AppleMuxListener ?? "unknown process")
+                    : Loc.T("UsbMuxUnavailable");
+            Set(UsbMux, UsbMuxDot, usb.AppleMuxAvailable, muxMessage);
+            string filterMessage = !usb.PhonePluggedIn
+                ? Loc.T("UsbCaptureFilterNoPhone")
+                : usb.CaptureFilterAttached
+                    ? Loc.T("UsbCaptureFilterFound")
+                    : Loc.T("UsbCaptureFilterMissing");
+            Set(UsbCaptureFilter, UsbCaptureFilterDot, usb.CaptureFilterAttached, filterMessage);
             Set(UsbParent, UsbParentDot, usb.PhonePluggedIn && usb.ParentCompositeDriverReady,
                 Loc.T(!usb.PhonePluggedIn ? "UsbParentNoPhone" : usb.ParentCompositeDriverReady ? "UsbParentReady" : "UsbParentWrong", usb.ParentDriverService ?? "unknown"));
             GetAppleDevices.Visibility = usb.AppleUsbDriverInstalled ? Visibility.Collapsed : Visibility.Visible;
