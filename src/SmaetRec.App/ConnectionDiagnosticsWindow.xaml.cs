@@ -226,8 +226,8 @@ public partial class ConnectionDiagnosticsWindow : Window
         {
             _usb ??= await Task.Run(UsbPhoneDetector.Check);
             var status = _usb;
-            string report = string.Join(Environment.NewLine,
-            [
+            string report = string.Join(Environment.NewLine, new[]
+            {
                 "SMAET REC — Apple USB diagnostic report",
                 $"Captured: {DateTimeOffset.Now:O}",
                 $"Phone detected: {status.PhonePluggedIn}",
@@ -244,7 +244,7 @@ public partial class ConnectionDiagnosticsWindow : Window
                 $"Apple support ready: {status.AppleSupportInstalled}",
                 "",
                 "Note: The report does not include the phone serial or personal data."
-            ]);
+            });
 
             Clipboard.SetText(report);
             MessageText.Text = Loc.T("DiagCopied");
