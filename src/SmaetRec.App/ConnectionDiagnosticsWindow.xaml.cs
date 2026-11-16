@@ -124,15 +124,20 @@ public partial class ConnectionDiagnosticsWindow : Window
             FirewallDot.Fill = Res(_firewall switch { true => "GreenBrush", false => "RedBrush", _ => "AmberBrush" });
 
             _usb = await Task.Run(UsbPhoneDetector.Check);
-            if (_usb.AppleSupportInstalled)
+            if (!_usb.AppleUsbDriverInstalled)
             {
-                DriverText.Text = Loc.T("DiagAppleSupportInstalled");
-                DriverDot.Fill = Res("GreenBrush");
+                DriverText.Text = Loc.T("DiagAppleUsbDriverMissing");
+                DriverDot.Fill = Res("AmberBrush");
+            }
+            else if (!_usb.AppleMobileDeviceServiceRunning)
+            {
+                DriverText.Text = Loc.T("DiagAppleServiceStopped");
+                DriverDot.Fill = Res("RedBrush");
             }
             else
             {
-                DriverText.Text = Loc.T("DiagAppleSupportMissing");
-                DriverDot.Fill = Res("AmberBrush");
+                DriverText.Text = Loc.T("DiagAppleSupportInstalled");
+                DriverDot.Fill = Res("GreenBrush");
             }
         }
         finally { _refreshing = false; }
