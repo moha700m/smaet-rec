@@ -7,7 +7,10 @@ namespace SmaetRec.Media;
 /// <summary>What Windows currently knows about an iPhone on a USB cable.</summary>
 public sealed record UsbPhoneStatus(bool PhonePluggedIn, bool AppleDriverInstalled, string? NetworkAddress, string? DeviceId = null)
 {
-    public bool Ready => PhonePluggedIn && AppleDriverInstalled;
+    // Apple Mobile Device Support and the capture filter are separate components.
+    // Presence of the phone is enough to attempt capture; the native host performs
+    // the real backend/driver preflight and reports its exact failure stage.
+    public bool Ready => PhonePluggedIn;
 }
 
 /// <summary>
