@@ -194,7 +194,6 @@ int Run(const std::wstring& pipeName, const std::wstring& requestedSerial) {
 
     SendStatus(L"Apple capture engine initialized; discovering the trusted USB device.");
     int exitCode = 0;
-    iPhoneMirror::SessionHandle session = 0;
     std::wstring udid;
     std::wstring deviceError;
     if (!FindDevice(requestedSerial, udid, deviceError)) {
