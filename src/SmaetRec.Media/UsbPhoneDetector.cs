@@ -9,13 +9,26 @@ public sealed record UsbPhoneStatus(
     bool AppleUsbDriverInstalled,
     bool AppleMobileDeviceServiceRunning,
     string? ParentDriverService = null,
-    string? DeviceId = null)
+    string? DeviceId = null,
+    bool AppleMobileDeviceServiceInstalled = false,
+    bool AppleMuxAvailable = false,
+    bool AppleMuxPortOccupied = false,
+    string? AppleMuxListener = null,
+    string? AppleUsbDriverInf = null,
+    bool CaptureFilterAttached = false)
 {
-    // iTunes/Lockdown needs both the actual Apple USB driver package and the
-    // Apple Mobile Device service. A photo-transfer/PTP device alone is not enough.
-    public bool AppleSupportInstalled => AppleUsbDriverInstalled && AppleMobileDeviceServiceRunning;
+    public bool HasAppleMuxConflict => AppleMuxPortOccupied && !AppleMuxAvailable;
+
+    // The Store and desktop Apple packages can expose usbmux differently.
+    // A valid ListDevices response is stronger evidence than a service name;
+    // a busy but incompatible listener must never be treated as healthy.
+    public bool AppleSupportInstalled => AppleUsbDriverInstalled && !HasAppleMuxConflict &&
+        (AppleMuxAvailable || (AppleMobileDeviceServiceInstalled && AppleMobileDeviceServiceRunning));
+
     public bool ParentCompositeDriverReady =>
         !PhonePluggedIn || string.Equals(ParentDriverService, "usbccgp", StringComparison.OrdinalIgnoreCase);
+
+    // This is USB presence only, not a claim that Apple pairing/capture works.
     public bool Ready => PhonePluggedIn;
 }
 
@@ -59,14 +72,70 @@ public static class UsbPhoneDetector
     public static UsbPhoneStatus Check()
     {
         var device = FindAppleMobileUsbDevice();
-        bool driverInstalled = AppleUsbDriverInstalled();
-        bool serviceRunning = AppleMobileDeviceServiceRunning();
+        string? driverInf = FindAppleUsbDriverInf();
+        var service = QueryAppleMobileDeviceService();
+        var mux = AppleUsbMuxProbe.Inspect();
         string? parentService = device is null ? null : ReadParentDriverService(device.InstanceId);
-        return new UsbPhoneStatus(device != null, driverInstalled, serviceRunning, parentService, device?.Serial);
+        bool captureFilter = device is not null && HasCaptureFilter(device.InstanceId);
+        return new UsbPhoneStatus(
+            device is not null,
+            driverInf is not null,
+            service.Running,
+            parentService,
+            device?.Serial,
+            service.Installed,
+            mux.Available,
+            mux.PortOccupied,
+            mux.Listener,
+            driverInf,
+            captureFilter);
     }
 
-    /// <summary>Find a present Apple mobile USB parent and return its PnP instance serial.</summary>
     private sealed record ApplePnpDevice(string Serial, string InstanceId);
+
+    private static readonly HashSet<ushort> AppleMobileCaptureProductIds =
+    [
+        0x1290, 0x1291, 0x1292, 0x1293, 0x1294, 0x1297, 0x1299, 0x129A,
+        0x129C, 0x129D, 0x129E, 0x129F, 0x12A0, 0x12A1, 0x12A2, 0x12A3,
+        0x12A4, 0x12A5, 0x12A6, 0x12A8, 0x12A9, 0x12AA, 0x12AB, 0x12AC
+    ];
+
+    /// <summary>Accept only known Apple iPhone/iPad composite-parent PnP IDs.</summary>
+    public static bool IsAppleMobileCaptureParentInstanceId(string? instanceId) =>
+        TryParseAppleMobileCaptureParent(instanceId, out _);
+
+    /// <summary>Returns the exact PnP serial only for a supported Apple mobile USB parent.</summary>
+    public static string? ParseAppleMobileCaptureParentSerial(string? instanceId) =>
+        TryParseAppleMobileCaptureParent(instanceId, out string? serial) ? serial : null;
+
+    private static bool TryParseAppleMobileCaptureParent(string? instanceId, out string? serial)
+    {
+        serial = null;
+        const string prefix = @"USB\VID_05AC&PID_";
+        if (string.IsNullOrWhiteSpace(instanceId) ||
+            !instanceId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+            instanceId.Contains("&MI_", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        int productEnd = instanceId.IndexOf('\\', prefix.Length);
+        if (productEnd != prefix.Length + 4 ||
+            instanceId.IndexOf('\\', productEnd + 1) >= 0)
+            return false;
+
+        if (!ushort.TryParse(instanceId.AsSpan(prefix.Length, 4),
+                System.Globalization.NumberStyles.HexNumber,
+                System.Globalization.CultureInfo.InvariantCulture, out ushort productId) ||
+            !AppleMobileCaptureProductIds.Contains(productId))
+            return false;
+
+        string candidate = instanceId[(productEnd + 1)..].Trim();
+        if (candidate.Length is < 16 or > 48 ||
+            !candidate.All(character => char.IsAsciiLetterOrDigit(character) || character == '-'))
+            return false;
+
+        serial = candidate;
+        return true;
+    }
 
     private static ApplePnpDevice? FindAppleMobileUsbDevice()
     {
@@ -80,14 +149,8 @@ public static class UsbPhoneDetector
                 return null;
             foreach (var id in new string(buffer).Split('\0', StringSplitOptions.RemoveEmptyEntries))
             {
-                if (!id.Contains("VID_05AC&PID_12", StringComparison.OrdinalIgnoreCase) ||
-                    id.Contains("&MI_", StringComparison.OrdinalIgnoreCase)) continue;
-                int slash = id.LastIndexOf('\\');
-                if (slash < 0 || slash == id.Length - 1) continue;
-                string serial = id[(slash + 1)..].Trim();
-                if (serial.Length >= 16 && serial.Length <= 48 &&
-                    serial.All(c => char.IsAsciiLetterOrDigit(c) || c == '-'))
-                    return new ApplePnpDevice(serial, id);
+                string? serial = ParseAppleMobileCaptureParentSerial(id);
+                if (serial is not null) return new ApplePnpDevice(serial, id);
             }
         }
         catch (Exception error) when (error is DllNotFoundException or EntryPointNotFoundException)
@@ -110,27 +173,27 @@ public static class UsbPhoneDetector
         }
     }
 
-    private static bool AppleUsbDriverInstalled()
+    private static string? FindAppleUsbDriverInf()
     {
         string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         string driverStore = Path.Combine(windows, "System32", "DriverStore", "FileRepository");
         string[] infNames = ["appleusb.inf", "usbaapl64.inf", "usbaapl.inf"];
-        try
+        if (Directory.Exists(driverStore))
         {
-            if (Directory.Exists(driverStore))
+            foreach (string inf in infNames)
             {
-                foreach (string inf in infNames)
+                try
                 {
                     foreach (string directory in Directory.EnumerateDirectories(
                                  driverStore, inf + "_*", SearchOption.TopDirectoryOnly))
                     {
-                        if (File.Exists(Path.Combine(directory, inf))) return true;
+                        if (File.Exists(Path.Combine(directory, inf))) return inf;
                     }
                 }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                {
+                }
             }
-        }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-        {
         }
 
         string[] programRoots =
@@ -143,16 +206,18 @@ public static class UsbPhoneDetector
             string legacyDrivers = Path.Combine(root, "Common Files", "Apple", "Mobile Device Support", "Drivers");
             foreach (string inf in infNames)
             {
-                if (File.Exists(Path.Combine(legacyDrivers, inf))) return true;
+                if (File.Exists(Path.Combine(legacyDrivers, inf))) return inf;
             }
         }
-        return false;
+        return null;
     }
 
-    private static bool AppleMobileDeviceServiceRunning()
+    private sealed record AppleServiceStatus(bool Installed, bool Running, string? Name);
+
+    private static AppleServiceStatus QueryAppleMobileDeviceService()
     {
         IntPtr manager = OpenSCManager(null, null, ScManagerConnect);
-        if (manager == IntPtr.Zero) return false;
+        if (manager == IntPtr.Zero) return new(false, false, null);
         try
         {
             foreach (string serviceName in new[] { "Apple Mobile Device Service", "AppleMobileDeviceService" })
@@ -161,9 +226,9 @@ public static class UsbPhoneDetector
                 if (service == IntPtr.Zero) continue;
                 try
                 {
-                    if (QueryServiceStatus(service, out ServiceStatus status) &&
-                        status.CurrentState == ServiceRunning)
-                        return true;
+                    bool running = QueryServiceStatus(service, out ServiceStatus status) &&
+                        status.CurrentState == ServiceRunning;
+                    return new(true, running, serviceName);
                 }
                 finally
                 {
@@ -175,6 +240,28 @@ public static class UsbPhoneDetector
         {
             CloseServiceHandle(manager);
         }
-        return false;
+        return new(false, false, null);
     }
+
+    private static bool HasCaptureFilter(string instanceId)
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                @"SYSTEM\CurrentControlSet\Enum\" + instanceId, writable: false);
+            object? raw = key?.GetValue("UpperFilters");
+            IEnumerable<string> filters = raw switch
+            {
+                string[] values => values,
+                string value => [value],
+                _ => []
+            };
+            return filters.Any(value => string.Equals(value, "libusb0", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return false;
+        }
+    }
+
 }
