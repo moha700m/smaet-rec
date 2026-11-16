@@ -134,7 +134,7 @@ public partial class ConnectionDiagnosticsWindow : Window
                 DriverText.Text = Loc.T("DiagAppleUsbDriverMissing");
                 DriverDot.Fill = Res("AmberBrush");
             }
-            else if (!_usb.AppleMobileDeviceServiceRunning)
+            else if (!_usb.AppleSupportInstalled)
             {
                 DriverText.Text = Loc.T("DiagAppleServiceStopped");
                 DriverDot.Fill = Res("RedBrush");
@@ -144,6 +144,35 @@ public partial class ConnectionDiagnosticsWindow : Window
                 DriverText.Text = Loc.T("DiagAppleSupportInstalled");
                 DriverDot.Fill = Res("GreenBrush");
             }
+
+            if (_usb.AppleMuxAvailable)
+            {
+                UsbMuxText.Text = Loc.T("DiagAppleMuxReady");
+                UsbMuxDot.Fill = Res("GreenBrush");
+            }
+            else if (_usb.HasAppleMuxConflict)
+            {
+                UsbMuxText.Text = Loc.T("DiagAppleMuxConflict", _usb.AppleMuxListener ?? "unknown process");
+                UsbMuxDot.Fill = Res("RedBrush");
+            }
+            else if (_usb.AppleSupportInstalled)
+            {
+                UsbMuxText.Text = Loc.T("DiagAppleMuxLegacy");
+                UsbMuxDot.Fill = Res("AmberBrush");
+            }
+            else
+            {
+                UsbMuxText.Text = Loc.T("DiagAppleMuxUnavailable");
+                UsbMuxDot.Fill = Res("RedBrush");
+            }
+
+            UsbCaptureFilterText.Text = !_usb.PhonePluggedIn
+                ? Loc.T("DiagCaptureFilterNoPhone")
+                : _usb.CaptureFilterAttached
+                    ? Loc.T("DiagCaptureFilterFound")
+                    : Loc.T("DiagCaptureFilterMissing");
+            UsbCaptureFilterDot.Fill = Res(!_usb.PhonePluggedIn ? "SubtleBrush" :
+                _usb.CaptureFilterAttached ? "GreenBrush" : "AmberBrush");
         }
         finally { _refreshing = false; }
     }
@@ -191,6 +220,44 @@ public partial class ConnectionDiagnosticsWindow : Window
             MessageText.Foreground = Res("RedBrush");
         }
     }
+    private async void CopyUsbReport_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            _usb ??= await Task.Run(UsbPhoneDetector.Check);
+            var status = _usb;
+            string report = string.Join(Environment.NewLine,
+            [
+                "SMAET REC — Apple USB diagnostic report",
+                $"Captured: {DateTimeOffset.Now:O}",
+                $"Phone detected: {status.PhonePluggedIn}",
+                $"Apple USB driver: {status.AppleUsbDriverInf ?? (status.AppleUsbDriverInstalled ? "installed (INF not resolved)" : "missing")}",
+                $"Apple Mobile Device Service installed: {status.AppleMobileDeviceServiceInstalled}",
+                $"Apple Mobile Device Service running: {status.AppleMobileDeviceServiceRunning}",
+                $"Apple usbmux ListDevices: {status.AppleMuxAvailable}",
+                $"Apple usbmux port 27015 occupied: {status.AppleMuxPortOccupied}",
+                $"Port 27015 listener: {status.AppleMuxListener ?? "none identified"}",
+                $"Apple usbmux conflict: {status.HasAppleMuxConflict}",
+                $"USB parent service: {status.ParentDriverService ?? "unknown"}",
+                $"USB composite parent ready: {status.ParentCompositeDriverReady}",
+                $"Per-device libusb0 capture filter: {status.CaptureFilterAttached}",
+                $"Apple support ready: {status.AppleSupportInstalled}",
+                "",
+                "Note: The report does not include the phone serial or personal data."
+            ]);
+
+            Clipboard.SetText(report);
+            MessageText.Text = Loc.T("DiagCopied");
+            MessageText.Foreground = Res("GreenBrush");
+        }
+        catch (Exception error) when (error is System.Runtime.InteropServices.COMException or
+            InvalidOperationException or System.Security.SecurityException)
+        {
+            MessageText.Text = Loc.T("DiagCopyFailed");
+            MessageText.Foreground = Res("RedBrush");
+        }
+    }
+
     private void InstallDrivers_Click(object sender, RoutedEventArgs e) => NetworkDiagnostics.OpenAppleDevicesStore();
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
 }
