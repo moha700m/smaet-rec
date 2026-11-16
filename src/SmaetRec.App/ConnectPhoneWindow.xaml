@@ -81,11 +81,28 @@
                         <TextBlock x:Name="UsbDriver" Margin="8,0,0,0" TextWrapping="Wrap" MaxWidth="330" Foreground="{StaticResource SubtleBrush}" FontSize="13"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,7">
-                        <Ellipse x:Name="UsbNetworkDot" Width="9" Height="9" Fill="{StaticResource SubtleBrush}" VerticalAlignment="Center"/>
-                        <TextBlock x:Name="UsbNetwork" Margin="8,0,0,0" TextWrapping="Wrap" MaxWidth="330" Foreground="{StaticResource SubtleBrush}" FontSize="13"/>
+                        <Ellipse x:Name="UsbServiceDot" Width="9" Height="9" Fill="{StaticResource SubtleBrush}" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="UsbService" Margin="8,0,0,0" TextWrapping="Wrap" MaxWidth="330" Foreground="{StaticResource SubtleBrush}" FontSize="13"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,7">
+                        <Ellipse x:Name="UsbMuxDot" Width="9" Height="9" Fill="{StaticResource SubtleBrush}" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="UsbMux" Margin="8,0,0,0" TextWrapping="Wrap" MaxWidth="330" Foreground="{StaticResource SubtleBrush}" FontSize="13"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,7">
+                        <Ellipse x:Name="UsbCaptureFilterDot" Width="9" Height="9" Fill="{StaticResource SubtleBrush}" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="UsbCaptureFilter" Margin="8,0,0,0" TextWrapping="Wrap" MaxWidth="330" Foreground="{StaticResource SubtleBrush}" FontSize="13"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,7">
+                        <Ellipse x:Name="UsbParentDot" Width="9" Height="9" Fill="{StaticResource SubtleBrush}" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="UsbParent" Margin="8,0,0,0" TextWrapping="Wrap" MaxWidth="330" Foreground="{StaticResource SubtleBrush}" FontSize="13"/>
                     </StackPanel>
                     <Button x:Name="GetAppleDevices" Style="{StaticResource PlainButton}" Content="{Binding [GetAppleDevices], Source={x:Static core:Loc.Instance}}" HorizontalAlignment="Left" Margin="0,6,0,0"
                             Visibility="Collapsed" Click="GetAppleDevices_Click"/>
+                    <Button x:Name="ThreeUToolsScreen" Style="{StaticResource AccentButton}" Content="{Binding [Open3uToolsScreen], Source={x:Static core:Loc.Instance}}" HorizontalAlignment="Left" Margin="0,4,0,0"
+                            Click="Open3uToolsScreen_Click"/>
+                    <Button x:Name="InstallUsbDriver" Style="{StaticResource PlainButton}" Content="USB driver setup / repair" HorizontalAlignment="Left" Margin="0,4,0,0"
+                            Click="InstallUsbDriver_Click"/>
+                    <Button x:Name="ConnectUsb" Style="{StaticResource AccentButton}" Content="Connect USB" HorizontalAlignment="Left" Margin="0,8,0,0" IsEnabled="False" Click="ConnectUsb_Click"/>
                     <TextBlock Text="{Binding [UsbNote], Source={x:Static core:Loc.Instance}}" TextWrapping="Wrap" Foreground="{StaticResource SubtleBrush}" FontSize="12.5" Margin="0,12,0,0"/>
                 </StackPanel>
             </Border>

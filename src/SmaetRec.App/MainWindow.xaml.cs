@@ -511,12 +511,55 @@ public partial class MainWindow : Window
         var picker = new ScreenPickerWindow(Engine.ScreenActive) { Owner = this };
         if (picker.ShowDialog() != true) return;
         if (picker.HideRequested) Engine.HideScreen();
-        else if (picker.Selected != null)
+        else if (picker.Selected != null) ShowCapturedWindow(picker.Selected);
+        Dispatcher.BeginInvoke(UpdateMouseWatcher, DispatcherPriority.Background);
+    }
+
+    /// <summary>
+    /// Routes an externally selected window (including 3uTools Realtime Screen)
+    /// into the same live scene, compositor, effects, and recorder as any other source.
+    /// </summary>
+    public void ShowCapturedWindow(CaptureTarget target, bool fullCanvas = false)
+    {
+        if (target.Kind != CaptureKind.Window || !target.StillExists)
+        {
+            ShowToast(Loc.T("CaptureWindowClosed"), null, isError: true);
+            return;
+        }
+
+        if (fullCanvas)
+        {
+            int width = Math.Max(1, target.Width);
+            int height = Math.Max(1, target.Height);
+            double aspect = width / (double)height;
+            const double margin = 40;
+            double scale = Math.Min(
+                (Scene.CanvasWidth - margin * 2) / width,
+                (Scene.CanvasHeight - margin * 2) / height);
+
+            lock (Scene.Sync)
+            {
+                Scene.Phone.Visible = false;
+                Scene.Screen.Visible = true;
+                Scene.Screen.Aspect = aspect;
+                Scene.Screen.Width = width * scale;
+                Scene.Screen.CenterX = Scene.CanvasWidth / 2;
+                Scene.Screen.CenterY = Scene.CanvasHeight / 2;
+                Scene.Screen.RotationDeg = 0;
+            }
+        }
+        else
         {
             lock (Scene.Sync) Scene.Screen.Visible = true;
-            Engine.ShowScreen(picker.Selected);
         }
-        Dispatcher.BeginInvoke(UpdateMouseWatcher, DispatcherPriority.Background);
+
+        Scene.NotifyChanged();
+        Engine.ShowScreen(target);
+        Dispatcher.BeginInvoke(() =>
+        {
+            UpdateMouseWatcher();
+            RefreshStatus();
+        }, DispatcherPriority.Background);
     }
 
     private void Settings_Click(object sender, RoutedEventArgs e)

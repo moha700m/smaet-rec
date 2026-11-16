@@ -41,6 +41,14 @@
                             <Ellipse x:Name="DriverDot" Width="10" Height="10" Fill="{StaticResource AmberBrush}" VerticalAlignment="Center"/>
                             <TextBlock x:Name="DriverText" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
                         </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                            <Ellipse x:Name="UsbMuxDot" Width="10" Height="10" Fill="{StaticResource AmberBrush}" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="UsbMuxText" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                            <Ellipse x:Name="UsbCaptureFilterDot" Width="10" Height="10" Fill="{StaticResource AmberBrush}" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="UsbCaptureFilterText" Margin="10,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                        </StackPanel>
                     </StackPanel>
                 </Border>
 
@@ -53,6 +61,7 @@
                     <Button Style="{StaticResource PlainButton}" Content="{Binding [DiagInstallDrivers], Source={x:Static core:Loc.Instance}}" Click="InstallDrivers_Click"/>
                     <Button Style="{StaticResource PlainButton}" Content="{Binding [DiagCopyLog], Source={x:Static core:Loc.Instance}}" Click="CopyLog_Click"/>
                     <Button Style="{StaticResource PlainButton}" Content="{Binding [DiagSaveSample], Source={x:Static core:Loc.Instance}}" Click="SaveSample_Click"/>
+                    <Button Style="{StaticResource PlainButton}" Content="{Binding [DiagCopyUsbReport], Source={x:Static core:Loc.Instance}}" Click="CopyUsbReport_Click"/>
                 </WrapPanel>
 
                 <TextBlock x:Name="MessageText" Foreground="{StaticResource SubtleBrush}" FontSize="12.5" Margin="2,10,2,0" TextWrapping="Wrap"/>

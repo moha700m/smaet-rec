@@ -18,6 +18,9 @@ public sealed class Studio : IDisposable
     private const int SampleLimitBytes = 12 * 1024 * 1024;
     private MemoryStream? _sample;
     private int _samplePackets;
+    private DirectUsbCaptureClient? _usbClient;
+    private volatile bool _usbStreaming;
+    private volatile string _usbStatus = "USB is idle.";
 
     public AppSettings Settings { get; }
     public Scene Scene { get; } = new();
@@ -75,6 +78,65 @@ public sealed class Studio : IDisposable
         catch (Exception e) when (e is not OutOfMemoryException) { Log.Error("Receiver start", e); }
     });
 
+    public async Task ConnectUsbAsync(string usbSerial, CancellationToken cancellationToken = default)
+    {
+        await StopUsbAsync().ConfigureAwait(false);
+        _usbStatus = "Starting the native USB capture host.";
+        var client = new DirectUsbCaptureClient(AppContext.BaseDirectory);
+        client.VideoFrame += OnDirectUsbFrame;
+        client.Status += message =>
+        {
+            _usbStatus = message;
+            Log.Write("USB: " + message);
+            PhoneStateChanged?.Invoke();
+        };
+        client.Failed += message =>
+        {
+            _usbStatus = "USB error: " + message;
+            Log.Write(_usbStatus);
+            PhoneStateChanged?.Invoke();
+        };
+        client.Disconnected += () =>
+        {
+            _usbStreaming = false;
+            if (!_usbStatus.StartsWith("USB error:", StringComparison.Ordinal))
+                _usbStatus = "USB capture disconnected.";
+            PhoneStateChanged?.Invoke();
+        };
+        _usbClient = client;
+        try { await client.StartAsync(usbSerial, cancellationToken).ConfigureAwait(false); }
+        catch (Exception ex)
+        {
+            _usbStatus = "USB startup failed: " + ex.Message;
+            _usbClient = null;
+            await client.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+        PhoneStateChanged?.Invoke();
+    }
+
+    public async Task StopUsbAsync()
+    {
+        var client = _usbClient;
+        _usbClient = null;
+        _usbStreaming = false;
+        _usbStatus = "USB capture stopped.";
+        if (client != null) await client.DisposeAsync().ConfigureAwait(false);
+        if (Receiver.State != ReceiverState.Connected && !Engine.PhoneFrames.IsSimulated) Engine.PhoneFrames.Clear();
+        PhoneStateChanged?.Invoke();
+    }
+
+    private void OnDirectUsbFrame(byte[] bgra, int width, int height, long timestamp100ns)
+    {
+        // iPhoneMirror's GPL Core API already decodes QuickTime FEED samples to
+        // BGRA. Forward decoded pixels directly; do not pretend they are H.264.
+        bool becameStreaming = !_usbStreaming;
+        _usbStreaming = true;
+        _usbStatus = "USB video is live.";
+        Engine.PhoneFrames.Submit(bgra, width, height);
+        if (becameStreaming) PhoneStateChanged?.Invoke();
+    }
+
     private void OnVideoPacket(VideoPacket packet)
     {
         lock (_decoderLock)
@@ -131,12 +193,15 @@ public sealed class Studio : IDisposable
             lock (_decoderLock) { old = _decoder; _decoder = null; _firstPacketTimestamp = null; _lastPacketPts = -1; }
             if (old != null) AddReceiverLog("Decoder at end of session: " + old.Describe() + (old.Error is { } error ? " error=" + error : ""));
             old?.Dispose();
-            if (!Engine.PhoneFrames.IsSimulated) Engine.PhoneFrames.Clear();
+            if (!UsbSessionActive && !Engine.PhoneFrames.IsSimulated) Engine.PhoneFrames.Clear();
         }
         PhoneStateChanged?.Invoke();
     }
 
-    public bool PhoneConnected => Receiver.State == ReceiverState.Connected || Engine.PhoneFrames.IsSimulated;
+    public bool UsbSessionActive => _usbClient?.IsActive == true;
+    public string UsbStatus => _usbStatus;
+    public bool UsbConnected => _usbStreaming;
+    public bool PhoneConnected => Receiver.State == ReceiverState.Connected || UsbConnected || Engine.PhoneFrames.IsSimulated;
 
     /// <summary>Pictures the Windows decoder has produced for the current iPhone session.</summary>
     public long PhoneFramesDecoded { get { lock (_decoderLock) return _decoder?.FramesDecoded ?? 0; } }
@@ -214,6 +279,7 @@ public sealed class Studio : IDisposable
         _autosave?.Dispose();
         SaveSession();
         SaveSettings();
+        try { StopUsbAsync().GetAwaiter().GetResult(); } catch (Exception e) { Log.Write("USB shutdown: " + e.Message); }
         Receiver.Dispose();
         lock (_decoderLock) { _decoder?.Dispose(); _decoder = null; }
         Engine.Dispose();
